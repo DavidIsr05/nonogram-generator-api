@@ -29,6 +29,7 @@ dependencies {
     implementation("commons-io:commons-io:2.21.0")
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")
+    implementation 'org.openpnp:opencv:4.7.0-0'
 }
 
 tasks.named('test') {

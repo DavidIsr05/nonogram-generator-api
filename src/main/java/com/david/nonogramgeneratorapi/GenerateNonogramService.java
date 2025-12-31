@@ -3,11 +3,17 @@ package com.david.nonogramgeneratorapi;
 import com.david.nonogramgeneratorapi.dtos.*;
 import org.apache.commons.io.FileUtils;
 import org.imgscalr.Scalr;
+import org.opencv.core.Core;
+import org.opencv.core.CvType;
+import org.opencv.core.Mat;
+import org.opencv.imgcodecs.Imgcodecs;
+import org.opencv.imgproc.Imgproc;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
 import java.io.File;
 import java.io.IOException;
 import java.util.Base64;
@@ -15,6 +21,7 @@ import java.util.Base64;
 @Service
 public class GenerateNonogramService {
     public nonogramResponseDto generateNonogram(nonogramGenerationRequestDto body) throws IOException {
+        System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
         String outputPath = "src/main/resources/";
 
         byte[] decodedBytes = Base64.getDecoder().decode(body.getImageBase64());
@@ -23,14 +30,27 @@ public class GenerateNonogramService {
 
         BufferedImage originalBufferedImage = ImageIO.read(originalImageFile);
 
+        int matrixSize = calculateImageSizeForScalingBasedOnDifficulty(body.getDifficulty());
+
         BufferedImage scaledBufferedImage = Scalr.resize(originalBufferedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
-                calculateImageSizeForScalingBasedOnDifficulty(body.getDifficulty()), Scalr.OP_ANTIALIAS);
+                matrixSize, Scalr.OP_ANTIALIAS);
 
         BufferedImage grayScaleBufferImage = new BufferedImage(scaledBufferedImage.getWidth(), scaledBufferedImage.getHeight(),
                 BufferedImage.TYPE_BYTE_GRAY);
         Graphics graphics = grayScaleBufferImage.getGraphics();
         graphics.drawImage(scaledBufferedImage, 0, 0, null);
         graphics.dispose();
+
+        byte[] pixels = ((DataBufferByte) grayScaleBufferImage.getRaster().getDataBuffer()).getData();
+
+        Mat mat = new Mat(matrixSize, matrixSize, CvType.CV_8UC3);
+        byte[] data = ((DataBufferByte) grayScaleBufferImage.getRaster().getDataBuffer()).getData();
+        mat.put(0, 0, data);
+
+        Mat edges = new Mat();
+        Imgproc.Canny(mat, edges, 50, 150);
+
+        boolean success = Imgcodecs.imwrite(outputPath, edges);
 
         long totalBrightness = calculateTotalBrightnessOfImage(grayScaleBufferImage);
         int pixelCount = grayScaleBufferImage.getWidth() * grayScaleBufferImage.getHeight();
@@ -53,11 +73,11 @@ public class GenerateNonogramService {
         byte[] fileContent = FileUtils.readFileToByteArray(new File(blackAndWhiteImageFile.getPath()));
         String encodedString = Base64.getEncoder().encodeToString(fileContent);
 
-        if (blackAndWhiteImageFile.delete()) {
-            System.out.println("Deleted the file: " + blackAndWhiteImageFile.getName());
-        } else {
-            System.out.println("Failed to delete the file");
-        }
+//        if (blackAndWhiteImageFile.delete()) {
+//            System.out.println("Deleted the file: " + blackAndWhiteImageFile.getName());
+//        } else {
+//            System.out.println("Failed to delete the file");
+//        }
 
         return new nonogramResponseDto(nonogram, encodedString);
     }
