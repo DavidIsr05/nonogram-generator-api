@@ -61,16 +61,21 @@ public class GenerateNonogramService {
         applySaliencyMask(originalImageFile.getAbsolutePath(), maskedImagePath);
 
         File processedFile = new File(maskedImagePath);
-        BufferedImage originalBufferedImage = ImageIO.read(processedFile);
+        BufferedImage originalBufferedImage = ImageIO.read(originalImageFile);
+        BufferedImage maskFromModelBufferedImage = ImageIO.read(processedFile);
+
+        BufferedImage modifiedBufferedImage = applyMaskFromModel(originalBufferedImage, maskFromModelBufferedImage, body.getDimmingFactor());
+        File ffff = new File(outputPath + "/ffffffff.png");
+        ImageIO.write(modifiedBufferedImage, "png", ffff);
+
 
         int matrixSize = calculateImageSizeForScalingBasedOnDifficulty(body.getDifficulty());
 
-        BufferedImage scaledBufferedImage = Scalr.resize(originalBufferedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
+        BufferedImage scaledBufferedImage = Scalr.resize(modifiedBufferedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
                 matrixSize, Scalr.OP_ANTIALIAS);
 
         File scaledImageFile = new File(outputPath + "/scaled.png");
         ImageIO.write(scaledBufferedImage, "png", scaledImageFile);
-
 
         BufferedImage grayScaleBufferImage = new BufferedImage(scaledBufferedImage.getWidth(), scaledBufferedImage.getHeight(),
                 BufferedImage.TYPE_BYTE_GRAY);
@@ -130,6 +135,41 @@ public class GenerateNonogramService {
         binaryMask.convertTo(binaryMask, CvType.CV_8U, 255);
 
         Imgcodecs.imwrite(outputPath, binaryMask);
+    }
+
+    private BufferedImage applyMaskFromModel(BufferedImage originalBufferedImage, BufferedImage maskFromModelBufferedImage, float dimmingFactor){
+
+        BufferedImage modifiedoriginalBufferedImage = originalBufferedImage;
+
+        for (int imageYIndex = 0; imageYIndex < originalBufferedImage.getHeight(); imageYIndex++) {
+            for (int imageXIndex = 0; imageXIndex < originalBufferedImage.getWidth(); imageXIndex++) {
+                boolean isNotMainObjectPixel = calculatePixelBrightness(maskFromModelBufferedImage, imageYIndex, imageXIndex) == 0;
+                int originalPixel = originalBufferedImage.getRGB(imageXIndex, imageYIndex);
+
+                int updatedPixel = getUpdatedPixel(dimmingFactor, originalPixel, isNotMainObjectPixel);
+
+                modifiedoriginalBufferedImage.setRGB(imageXIndex, imageYIndex, updatedPixel);
+            }
+        }
+
+        return modifiedoriginalBufferedImage;
+    }
+
+    private static int getUpdatedPixel(float dimmingFactor, int originalPixel, boolean isNotMainObjectPixel) {
+        Color color = new Color(originalPixel, true);
+
+        int red = (int) (color.getRed() / dimmingFactor);
+        int green = (int) (color.getGreen() / dimmingFactor);
+        int blue = (int) (color.getBlue() / dimmingFactor);
+        int alpha = color.getAlpha();
+
+        red = Math.min(255, Math.max(0, red));
+        green = Math.min(255, Math.max(0, green));
+        blue = Math.min(255, Math.max(0, blue));
+
+        Color dimmedColor = new Color(red, green, blue, alpha);
+
+        return isNotMainObjectPixel ? dimmedColor.getRGB() : originalPixel;
     }
 
     private int calculateImageSizeForScalingBasedOnDifficulty(Difficulty difficulty){
