@@ -58,11 +58,10 @@ public class GenerateNonogramService {
         FileUtils.writeByteArrayToFile(originalImageFile, decodedBytes);
 
         String maskedImagePath = outputPath + "masked-image.png";
-        //applySaliencyMask(originalImageFile.getAbsolutePath(), maskedImagePath);
+        applySaliencyMask(originalImageFile.getAbsolutePath(), maskedImagePath);
 
         File processedFile = new File(maskedImagePath);
-        //BufferedImage originalBufferedImage = ImageIO.read(processedFile);
-        BufferedImage originalBufferedImage = ImageIO.read(originalImageFile);
+        BufferedImage originalBufferedImage = ImageIO.read(processedFile);
 
         int matrixSize = calculateImageSizeForScalingBasedOnDifficulty(body.getDifficulty());
 
@@ -72,7 +71,6 @@ public class GenerateNonogramService {
         File scaledImageFile = new File(outputPath + "/scaled.png");
         ImageIO.write(scaledBufferedImage, "png", scaledImageFile);
 
-        applySaliencyMask(scaledImageFile.getAbsolutePath(), maskedImagePath);
 
         BufferedImage grayScaleBufferImage = new BufferedImage(scaledBufferedImage.getWidth(), scaledBufferedImage.getHeight(),
                 BufferedImage.TYPE_BYTE_GRAY);
@@ -116,12 +114,12 @@ public class GenerateNonogramService {
         Mat image = Imgcodecs.imread(inputPath);
         if (image.empty()) return;
 
-        Mat blob = Dnn.blobFromImage(image, 0.08, new Size(40, 40), new Scalar(0, 0, 0), true, false);
+        Mat blob = Dnn.blobFromImage(image, 0.011, new Size(320, 320), new Scalar(0, 0, 0), true, false);
         net.setInput(blob);
 
         Mat output = net.forward();
 
-        Mat score = output.reshape(1, 40);
+        Mat score = output.reshape(1, 320);
 
         Mat mask = new Mat();
         Imgproc.resize(score, mask, image.size());
