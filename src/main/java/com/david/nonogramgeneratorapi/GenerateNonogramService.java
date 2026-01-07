@@ -61,7 +61,7 @@ public class GenerateNonogramService {
         File processedFile = new File(maskedImagePath);
         BufferedImage maskFromModelBufferedImage = ImageIO.read(processedFile);
 
-        BufferedImage modifiedBufferedImage = applyMaskFromModel(originalImageFile.getAbsoluteFile(), maskFromModelBufferedImage, body.getDimmingFactor());
+        BufferedImage modifiedBufferedImage = applyMaskFromModel(originalImageFile.getAbsoluteFile(), maskFromModelBufferedImage);
 
         int matrixSize = calculateImageSizeForScalingBasedOnDifficulty(body.getDifficulty());
 
@@ -82,7 +82,7 @@ public class GenerateNonogramService {
         long totalBrightness = calculateTotalBrightnessOfImage(originalScaled);
         int pixelCount = matrixSize * matrixSize;
 
-        int threshold = (int) (totalBrightness / pixelCount) + body.getContrast();
+        int threshold = (int) (totalBrightness / pixelCount);
         System.out.println(threshold);
 
         BufferedImage blackAndWhiteBufferedImage = generateBlackAndWhiteImage(grayScaleBufferImage, threshold);
@@ -97,6 +97,8 @@ public class GenerateNonogramService {
 
         byte[] fileContent = FileUtils.readFileToByteArray(blackAndWhiteImageFile);
         String encodedString = Base64.getEncoder().encodeToString(fileContent);
+
+        if (blackAndWhiteImageFile.delete()) System.out.println("Deleted black-and-white");
 
         return new nonogramResponseDto(nonogram, encodedString);
     }
@@ -113,12 +115,12 @@ public class GenerateNonogramService {
         Mat image = Imgcodecs.imread(inputPath);
         if (image.empty()) return;
 
-        Mat blob = Dnn.blobFromImage(image, 0.011, new Size(280, 280), new Scalar(0, 0, 0), true, false);
+        Mat blob = Dnn.blobFromImage(image, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
         net.setInput(blob);
 
         Mat output = net.forward();
 
-        Mat score = output.reshape(1, 280);
+        Mat score = output.reshape(1, 250);
         Mat mask = new Mat();
         Imgproc.resize(score, mask, image.size());
         Mat binaryMask = new Mat();
@@ -129,7 +131,7 @@ public class GenerateNonogramService {
         Imgcodecs.imwrite(outputPath, binaryMask);
     }
 
-    private BufferedImage applyMaskFromModel(File originalImageFile, BufferedImage maskFromModelBufferedImage, float dimmingFactor) throws IOException {
+    private BufferedImage applyMaskFromModel(File originalImageFile, BufferedImage maskFromModelBufferedImage) throws IOException {
 
         BufferedImage originalBufferedImage = ImageIO.read(originalImageFile);
 
@@ -138,7 +140,7 @@ public class GenerateNonogramService {
                 boolean isNotMainObjectPixel = calculatePixelBrightness(maskFromModelBufferedImage, imageYIndex, imageXIndex) == 0;
                 int originalPixel = originalBufferedImage.getRGB(imageXIndex, imageYIndex);
 
-                int updatedPixel = getUpdatedPixel(dimmingFactor, originalPixel, isNotMainObjectPixel);
+                int updatedPixel = getUpdatedPixel(originalPixel, isNotMainObjectPixel);
 
                 originalBufferedImage.setRGB(imageXIndex, imageYIndex, updatedPixel);
             }
@@ -147,12 +149,12 @@ public class GenerateNonogramService {
         return originalBufferedImage;
     }
 
-    private static int getUpdatedPixel(float dimmingFactor, int originalPixel, boolean isNotMainObjectPixel) {
+    private static int getUpdatedPixel(int originalPixel, boolean isNotMainObjectPixel) {
         Color color = new Color(originalPixel, true);
 
-        int red = (int) (color.getRed() * dimmingFactor);
-        int green = (int) (color.getGreen() * dimmingFactor);
-        int blue = (int) (color.getBlue() * dimmingFactor);
+        int red = (int) (color.getRed() * 0.2);
+        int green = (int) (color.getGreen() * 0.2);
+        int blue = (int) (color.getBlue() * 0.2);
         int alpha = color.getAlpha();
 
         red = Math.min(255, Math.max(0, red));
@@ -161,7 +163,7 @@ public class GenerateNonogramService {
 
         Color dimmedColor = new Color(red, green, blue, alpha);
 
-        return isNotMainObjectPixel ? dimmedColor.getRGB() : originalPixel;
+        return isNotMainObjectPixel ? originalPixel : dimmedColor.getRGB();
     }
 
     private int calculateImageSizeForScalingBasedOnDifficulty(Difficulty difficulty){
