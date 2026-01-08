@@ -27,27 +27,26 @@ public class GenerateNonogramService {
 
     static {
         try {
-            System.load("/Users/david/Documents/nonogramGeneratorAPI/src/main/resources/libopencv_java4120.dylib");
+            System.load("/Users/david/Documents/nonogramGeneratorAPI/src/main/resources/libopencv_java4120.dylib"); // TODO change the dir so it will work in container also
         } catch (UnsatisfiedLinkError e) {
-            System.err.println("could not load openCV jar files: " + e.getMessage());
-            System.exit(1);
+            throw new UnsatisfiedLinkError("Can't load openCV jar files. Error message: " + e);
         }
     }
 
     @PostConstruct
-    public void initModel() {
+    public void initModel() throws Exception {
         try {
             this.net = Dnn.readNetFromONNX(modelPath);
             if (this.net.empty()) {
-                System.err.println("failed to load U2Net model");
+                throw new Exception("Could not load model. Model variable empty after trying to load it.");
             }
         } catch (Exception e) {
-            System.err.println("Exception loading model: " + e.getMessage());
+            throw new Exception("Exception loading model: " + e);
         }
     }
 
-    public nonogramResponseDto generateNonogram(nonogramGenerationRequestDto body) throws IOException {
-        byte[] decodedBytes = Base64.getDecoder().decode(body.getImageBase64());
+    public nonogramResponseDto generateNonogram(nonogramGenerationRequestDto requestBody) throws Exception {
+        byte[] decodedBytes = Base64.getDecoder().decode(requestBody.getImageBase64());
         String outputPath = "src/main/resources/";
 
         File originalImageFile = new File(outputPath + "original-image.jpg");
@@ -56,14 +55,14 @@ public class GenerateNonogramService {
         BufferedImage originalBufferImage = ImageIO.read(originalImageFile);
 
         String maskedImagePath = outputPath + "masked-image.png";
-        applySaliencyMask(originalImageFile.getAbsolutePath(), maskedImagePath);
+        detectMainObjectUsingModel(originalImageFile.getAbsolutePath(), maskedImagePath);
 
         File processedFile = new File(maskedImagePath);
         BufferedImage maskFromModelBufferedImage = ImageIO.read(processedFile);
 
         BufferedImage modifiedBufferedImage = applyMaskFromModel(originalImageFile.getAbsoluteFile(), maskFromModelBufferedImage);
 
-        int matrixSize = calculateImageSizeForScalingBasedOnDifficulty(body.getDifficulty());
+        int matrixSize = requestBody.getDifficulty().matrixSize;
 
         BufferedImage scaledBufferedImage = Scalr.resize(modifiedBufferedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
                 matrixSize, Scalr.OP_ANTIALIAS);
@@ -79,11 +78,7 @@ public class GenerateNonogramService {
         graphics.drawImage(scaledBufferedImage, 0, 0, null);
         graphics.dispose();
 
-        long totalBrightness = calculateTotalBrightnessOfImage(originalScaled);
-        int pixelCount = matrixSize * matrixSize;
-
-        int threshold = (int) (totalBrightness / pixelCount);
-        System.out.println(threshold);
+        int threshold = calculateAverageBrightnessOfImage(originalScaled, matrixSize);
 
         BufferedImage blackAndWhiteBufferedImage = generateBlackAndWhiteImage(grayScaleBufferImage, threshold);
 
@@ -92,43 +87,46 @@ public class GenerateNonogramService {
 
         boolean[][] nonogram = generateNonogram(blackAndWhiteBufferedImage);
 
-        if (originalImageFile.delete()) System.out.println("Deleted original");
-        if (processedFile.delete()) System.out.println("Deleted masked");
+        if (!originalImageFile.delete()) throw new Exception("Could not delete " + originalImageFile + " file");
+        if (!processedFile.delete()) throw new Exception("Could not delete " + processedFile + " file");
 
         byte[] fileContent = FileUtils.readFileToByteArray(blackAndWhiteImageFile);
         String encodedString = Base64.getEncoder().encodeToString(fileContent);
 
-        if (blackAndWhiteImageFile.delete()) System.out.println("Deleted black-and-white");
+        if (!blackAndWhiteImageFile.delete()) throw new Exception("Could not delete " + blackAndWhiteImageFile + " file");
 
         return new nonogramResponseDto(nonogram, encodedString);
     }
 
-    private void applySaliencyMask(String inputPath, String outputPath) {
+    private void detectMainObjectUsingModel(String inputPath, String outputPath) throws Exception {
         if (this.net == null || this.net.empty()) {
             System.err.println("skip background removal cause model not loaded");
             try {
                 FileUtils.copyFile(new File(inputPath), new File(outputPath));
-            } catch (IOException e) { e.printStackTrace(); }
+            } catch (IOException e) {
+                throw new IOException(e.getMessage());
+            }
             return;
         }
 
-        Mat image = Imgcodecs.imread(inputPath);
-        if (image.empty()) return;
+        Mat imageFromInputPath = Imgcodecs.imread(inputPath);
+        if (imageFromInputPath.empty()) throw new Exception("Problem while loading original image for model in: 'detectMainObjectUsingModel");
 
-        Mat blob = Dnn.blobFromImage(image, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
-        net.setInput(blob);
+        Mat mainObjectFromModel = Dnn.blobFromImage(imageFromInputPath, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
+        net.setInput(mainObjectFromModel);
 
-        Mat output = net.forward();
+        Mat originalMatOfMainObject = net.forward();
 
-        Mat score = output.reshape(1, 250);
-        Mat mask = new Mat();
-        Imgproc.resize(score, mask, image.size());
-        Mat binaryMask = new Mat();
-        Imgproc.threshold(mask, binaryMask, 0.5, 1, Imgproc.THRESH_BINARY);
+        Mat reshapedMatOfMainObject = originalMatOfMainObject.reshape(1, 250);
 
-        binaryMask.convertTo(binaryMask, CvType.CV_8U, 255);
+        Mat resizedMatOfMainObject = new Mat();
+        Imgproc.resize(reshapedMatOfMainObject, resizedMatOfMainObject, imageFromInputPath.size());
 
-        Imgcodecs.imwrite(outputPath, binaryMask);
+        Mat binaryMatOfMainObject = new Mat();
+        Imgproc.threshold(resizedMatOfMainObject, binaryMatOfMainObject, 0.5, 1, Imgproc.THRESH_BINARY);
+        binaryMatOfMainObject.convertTo(binaryMatOfMainObject, CvType.CV_8U, 255);
+
+        Imgcodecs.imwrite(outputPath, binaryMatOfMainObject);
     }
 
     private BufferedImage applyMaskFromModel(File originalImageFile, BufferedImage maskFromModelBufferedImage) throws IOException {
@@ -152,22 +150,18 @@ public class GenerateNonogramService {
     private static int getUpdatedPixel(int originalPixel, boolean isNotMainObjectPixel) {
         Color color = new Color(originalPixel, true);
 
-        int red = (int) (color.getRed() * 0.2);
-        int green = (int) (color.getGreen() * 0.2);
-        int blue = (int) (color.getBlue() * 0.2);
-        int alpha = color.getAlpha();
+        final int originalRed = color.getRed();
+        final int originalGreen = color.getGreen();
+        final int originalBlue = color.getBlue();
+        final int alpha = color.getAlpha();
 
-        red = Math.min(255, Math.max(0, red));
-        green = Math.min(255, Math.max(0, green));
-        blue = Math.min(255, Math.max(0, blue));
+        int newRed = Math.min(255, Math.max(0, (int) (originalRed * 0.2)));
+        int newGreen = Math.min(255, Math.max(0, (int) (originalGreen * 0.2)));
+        int newBlue = Math.min(255, Math.max(0, (int) (originalBlue * 0.2)));
 
-        Color dimmedColor = new Color(red, green, blue, alpha);
+        Color dimmedColor = new Color(newRed, newGreen, newBlue, alpha);
 
         return isNotMainObjectPixel ? originalPixel : dimmedColor.getRGB();
-    }
-
-    private int calculateImageSizeForScalingBasedOnDifficulty(Difficulty difficulty){
-        return 20 + (10 * difficulty.ordinal());
     }
 
     private int calculatePixelBrightness(BufferedImage source, int imageYIndex, int imageXIndex) {
@@ -177,7 +171,7 @@ public class GenerateNonogramService {
         return (pixelColorRGB.getRed() + pixelColorRGB.getGreen() + pixelColorRGB.getBlue()) / 3;
     }
 
-    private int calculateTotalBrightnessOfImage(BufferedImage grayScaleBufferImage){
+    private int calculateAverageBrightnessOfImage(BufferedImage grayScaleBufferImage, int matrixSize){
         long totalBrightness = 0;
         for (int imageYIndex = 0; imageYIndex < grayScaleBufferImage.getHeight(); imageYIndex++) {
             for (int imageXIndex = 0; imageXIndex < grayScaleBufferImage.getWidth(); imageXIndex++) {
@@ -185,7 +179,9 @@ public class GenerateNonogramService {
             }
         }
 
-        return (int)totalBrightness;
+        int pixelCount = matrixSize * matrixSize;
+
+        return (int) (totalBrightness / pixelCount);
     }
 
     private BufferedImage generateBlackAndWhiteImage(BufferedImage grayScaleBufferImage, int threshold){
@@ -217,9 +213,9 @@ public class GenerateNonogramService {
                 int rgb = blackAndWhiteImage.getRGB(imageXIndex, imageYIndex);
 
                 Color color = new Color(rgb);
-                boolean isBlack = (color.getRed() < 128);
+                boolean isPixelBlack = (color.getRed() < 128);
 
-                nonogram[imageXIndex][imageYIndex] = isBlack;
+                nonogram[imageXIndex][imageYIndex] = isPixelBlack;
             }
         }
 
