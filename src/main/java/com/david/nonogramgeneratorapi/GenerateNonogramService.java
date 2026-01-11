@@ -16,7 +16,9 @@ import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.FileSystemException;
 import java.util.Base64;
 
 @Service
@@ -38,10 +40,10 @@ public class GenerateNonogramService {
         try {
             this.net = Dnn.readNetFromONNX(modelPath);
             if (this.net.empty()) {
-                throw new Exception("Could not load model. Model variable empty after trying to load it.");
+                throw new CouldNotLoadModelException("Could not load model. Model variable empty after trying to load it.");
             }
-        } catch (Exception e) {
-            throw new Exception("Exception loading model: " + e);
+        } catch (CouldNotLoadModelException e) {
+            throw new CouldNotLoadModelException("Exception loading model: " + e);
         }
     }
 
@@ -62,7 +64,7 @@ public class GenerateNonogramService {
 
         BufferedImage modifiedBufferedImage = applyMaskFromModel(originalImageFile.getAbsoluteFile(), maskFromModelBufferedImage);
 
-        int matrixSize = requestBody.getDifficulty().matrixSize;
+        int matrixSize = requestBody.getDifficulty().getMatrixSize();
 
         BufferedImage scaledBufferedImage = Scalr.resize(modifiedBufferedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
                 matrixSize, Scalr.OP_ANTIALIAS);
@@ -87,13 +89,13 @@ public class GenerateNonogramService {
 
         boolean[][] nonogram = generateNonogram(blackAndWhiteBufferedImage);
 
-        if (!originalImageFile.delete()) throw new Exception("Could not delete " + originalImageFile + " file");
-        if (!processedFile.delete()) throw new Exception("Could not delete " + processedFile + " file");
+        if (!originalImageFile.delete()) throw new IOException("Could not delete " + originalImageFile + " file with path: " + originalImageFile.getAbsolutePath());
+        if (!processedFile.delete()) throw new IOException("Could not delete " + processedFile + " file with path: " + originalImageFile.getAbsolutePath());
 
         byte[] fileContent = FileUtils.readFileToByteArray(blackAndWhiteImageFile);
         String encodedString = Base64.getEncoder().encodeToString(fileContent);
 
-        if (!blackAndWhiteImageFile.delete()) throw new Exception("Could not delete " + blackAndWhiteImageFile + " file");
+        if (!blackAndWhiteImageFile.delete()) throw new IOException("Could not delete " + blackAndWhiteImageFile + " file with path: " + originalImageFile.getAbsolutePath());
 
         return new nonogramResponseDto(nonogram, encodedString);
     }
@@ -103,14 +105,14 @@ public class GenerateNonogramService {
             System.err.println("skip background removal cause model not loaded");
             try {
                 FileUtils.copyFile(new File(inputPath), new File(outputPath));
-            } catch (IOException e) {
-                throw new IOException(e.getMessage());
+            } catch (FileSystemException e) {
+                throw new FileSystemException(e.getMessage());
             }
             return;
         }
 
         Mat imageFromInputPath = Imgcodecs.imread(inputPath);
-        if (imageFromInputPath.empty()) throw new Exception("Problem while loading original image for model in: 'detectMainObjectUsingModel");
+        if (imageFromInputPath.empty()) throw new FileNotFoundException("Problem while loading original image for model in: 'detectMainObjectUsingModel', with path: " + inputPath);
 
         Mat mainObjectFromModel = Dnn.blobFromImage(imageFromInputPath, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
         net.setInput(mainObjectFromModel);
@@ -148,20 +150,19 @@ public class GenerateNonogramService {
     }
 
     private static int getUpdatedPixel(int originalPixel, boolean isNotMainObjectPixel) {
-        Color color = new Color(originalPixel, true);
+        if (!isNotMainObjectPixel) {
+            Color color = new Color(originalPixel, true);
 
-        final int originalRed = color.getRed();
-        final int originalGreen = color.getGreen();
-        final int originalBlue = color.getBlue();
-        final int alpha = color.getAlpha();
+            final int newRed = Math.min(255, Math.max(0, (int) (color.getRed() * 0.2)));
+            final int newGreen = Math.min(255, Math.max(0, (int) (color.getGreen() * 0.2)));
+            final int newBlue = Math.min(255, Math.max(0, (int) (color.getBlue() * 0.2)));
+            final int alpha = color.getAlpha();
 
-        int newRed = Math.min(255, Math.max(0, (int) (originalRed * 0.2)));
-        int newGreen = Math.min(255, Math.max(0, (int) (originalGreen * 0.2)));
-        int newBlue = Math.min(255, Math.max(0, (int) (originalBlue * 0.2)));
+            Color dimmedColor = new Color(newRed, newGreen, newBlue, alpha);
+            originalPixel = dimmedColor.getRGB();
+        }
 
-        Color dimmedColor = new Color(newRed, newGreen, newBlue, alpha);
-
-        return isNotMainObjectPixel ? originalPixel : dimmedColor.getRGB();
+        return originalPixel;
     }
 
     private int calculatePixelBrightness(BufferedImage source, int imageYIndex, int imageXIndex) {
