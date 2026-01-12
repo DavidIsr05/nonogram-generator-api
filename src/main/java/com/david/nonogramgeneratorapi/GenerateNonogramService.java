@@ -1,41 +1,89 @@
 package com.david.nonogramgeneratorapi;
 
 import com.david.nonogramgeneratorapi.dtos.*;
+import jakarta.annotation.PostConstruct;
 import org.apache.commons.io.FileUtils;
 import org.imgscalr.Scalr;
+import org.opencv.core.*;
+import org.opencv.dnn.Dnn;
+import org.opencv.dnn.Net;
+import org.opencv.imgcodecs.Imgcodecs;
+import org.opencv.imgproc.Imgproc;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Graphics;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.FileSystemException;
 import java.util.Base64;
 
 @Service
 public class GenerateNonogramService {
-    public nonogramResponseDto generateNonogram(nonogramGenerationRequestDto body) throws IOException {
+
+    private Net net;
+    String modelPath = "src/main/resources/u2net.onnx";
+
+    static {
+        try {
+            System.load("/Users/david/Documents/nonogramGeneratorAPI/src/main/resources/libopencv_java4120.dylib"); // TODO change the dir so it will work in container also
+        } catch (UnsatisfiedLinkError e) {
+            throw new UnsatisfiedLinkError("Can't load openCV jar files. Error message: " + e);
+        }
+    }
+
+    @PostConstruct
+    public void initModel() throws Exception {
+        try {
+            this.net = Dnn.readNetFromONNX(modelPath);
+            if (this.net.empty()) {
+                throw new CouldNotLoadModelException("Could not load model. Model variable empty after trying to load it.");
+            }
+        } catch (CouldNotLoadModelException e) {
+            throw new CouldNotLoadModelException("Exception loading model: " + e);
+        }
+    }
+
+    public nonogramResponseDto generateNonogram(nonogramGenerationRequestDto requestBody) throws Exception {
+        byte[] decodedBytes = Base64.getDecoder().decode(requestBody.getImageBase64());
         String outputPath = "src/main/resources/";
 
-        byte[] decodedBytes = Base64.getDecoder().decode(body.getImageBase64());
         File originalImageFile = new File(outputPath + "original-image.jpg");
         FileUtils.writeByteArrayToFile(originalImageFile, decodedBytes);
 
-        BufferedImage originalBufferedImage = ImageIO.read(originalImageFile);
+        BufferedImage originalBufferImage = ImageIO.read(originalImageFile);
 
-        BufferedImage scaledBufferedImage = Scalr.resize(originalBufferedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
-                calculateImageSizeForScalingBasedOnDifficulty(body.getDifficulty()), Scalr.OP_ANTIALIAS);
+        String maskedImagePath = outputPath + "masked-image.png";
+        detectMainObjectUsingModel(originalImageFile.getAbsolutePath(), maskedImagePath);
 
-        BufferedImage grayScaleBufferImage = new BufferedImage(scaledBufferedImage.getWidth(), scaledBufferedImage.getHeight(),
-                BufferedImage.TYPE_BYTE_GRAY);
+        File processedFile = new File(maskedImagePath);
+        BufferedImage maskFromModelBufferedImage = ImageIO.read(processedFile);
+
+        BufferedImage modifiedBufferedImage = applyMaskFromModel(originalImageFile.getAbsoluteFile(), maskFromModelBufferedImage, requestBody.getPixelHighlightValue());
+
+        int matrixSize = requestBody.getDifficulty().getMatrixSize();
+
+        BufferedImage scaledBufferedImage = Scalr.resize(modifiedBufferedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
+                matrixSize, Scalr.OP_ANTIALIAS);
+
+        BufferedImage originalScaled = Scalr.resize(originalBufferImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
+                matrixSize, Scalr.OP_ANTIALIAS);
+
+        File originalDownscaledFile = new File(outputPath + "/original-downscaled.png");
+        ImageIO.write(originalScaled, "png", originalDownscaledFile);
+
+        BufferedImage grayScaleBufferImage = new BufferedImage(matrixSize, matrixSize, BufferedImage.TYPE_BYTE_GRAY);
         Graphics graphics = grayScaleBufferImage.getGraphics();
+
+        graphics.setColor(java.awt.Color.WHITE);
+        graphics.fillRect(0, 0, matrixSize, matrixSize);
         graphics.drawImage(scaledBufferedImage, 0, 0, null);
         graphics.dispose();
 
-        long totalBrightness = calculateTotalBrightnessOfImage(grayScaleBufferImage);
-        int pixelCount = grayScaleBufferImage.getWidth() * grayScaleBufferImage.getHeight();
-
-        int threshold = (int) (totalBrightness / pixelCount) + body.getContrast();
+        int threshold = calculateAverageBrightnessOfImage(originalScaled, matrixSize);
 
         BufferedImage blackAndWhiteBufferedImage = generateBlackAndWhiteImage(grayScaleBufferImage, threshold);
 
@@ -44,46 +92,103 @@ public class GenerateNonogramService {
 
         boolean[][] nonogram = generateNonogram(blackAndWhiteBufferedImage);
 
-        if (originalImageFile.delete()) {
-            System.out.println("Deleted the file: " + originalImageFile.getName());
-        } else {
-            System.out.println("Failed to delete the file");
-        }
+        File previewFile = new File(outputPath + "/opreviw.png");
+        ImageIO.write(highlightOriginalImageBasedOnBlackAndWhiteImage(blackAndWhiteBufferedImage, originalBufferImage, threshold), "png", previewFile);
 
-        byte[] fileContent = FileUtils.readFileToByteArray(new File(blackAndWhiteImageFile.getPath()));
+        if (!originalImageFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + originalImageFile + " file with path: " + originalImageFile.getAbsolutePath());
+        if (!processedFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + processedFile + " file with path: " + originalImageFile.getAbsolutePath());
+
+        byte[] fileContent = FileUtils.readFileToByteArray(blackAndWhiteImageFile);
         String encodedString = Base64.getEncoder().encodeToString(fileContent);
 
-        if (blackAndWhiteImageFile.delete()) {
-            System.out.println("Deleted the file: " + blackAndWhiteImageFile.getName());
-        } else {
-            System.out.println("Failed to delete the file");
-        }
+        if (!blackAndWhiteImageFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + blackAndWhiteImageFile + " file with path: " + originalImageFile.getAbsolutePath());
 
         return new nonogramResponseDto(nonogram, encodedString);
     }
 
-    private int calculateImageSizeForScalingBasedOnDifficulty(Difficulty difficulty){
-        return 20 + (10 * difficulty.ordinal());
+    private void detectMainObjectUsingModel(String inputPath, String outputPath) throws Exception {
+        if (this.net == null || this.net.empty()) {
+            System.err.println("skip background removal cause model not loaded");
+            try {
+                FileUtils.copyFile(new File(inputPath), new File(outputPath));
+            } catch (FileSystemException e) {
+                throw new FileSystemException(e.getMessage());
+            }
+            return;
+        }
+
+        Mat imageFromInputPath = Imgcodecs.imread(inputPath);
+        if (imageFromInputPath.empty()) throw new FileNotFoundException("Problem while loading original image for model in: 'detectMainObjectUsingModel', with path: " + inputPath);
+
+        Mat mainObjectFromModel = Dnn.blobFromImage(imageFromInputPath, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
+        net.setInput(mainObjectFromModel);
+
+        Mat originalMatOfMainObject = net.forward();
+
+        Mat reshapedMatOfMainObject = originalMatOfMainObject.reshape(1, 250);
+
+        Mat resizedMatOfMainObject = new Mat();
+        Imgproc.resize(reshapedMatOfMainObject, resizedMatOfMainObject, imageFromInputPath.size());
+
+        Mat binaryMatOfMainObject = new Mat();
+        Imgproc.threshold(resizedMatOfMainObject, binaryMatOfMainObject, 0.5, 1, Imgproc.THRESH_BINARY);
+        binaryMatOfMainObject.convertTo(binaryMatOfMainObject, CvType.CV_8U, 255);
+
+        Imgcodecs.imwrite(outputPath, binaryMatOfMainObject);
+    }
+
+    private BufferedImage applyMaskFromModel(File originalImageFile, BufferedImage maskFromModelBufferedImage, double pixelHighlightValue) throws IOException {
+
+        BufferedImage originalBufferedImage = ImageIO.read(originalImageFile);
+
+        for (int imageYIndex = 0; imageYIndex < originalBufferedImage.getHeight(); imageYIndex++) {
+            for (int imageXIndex = 0; imageXIndex < originalBufferedImage.getWidth(); imageXIndex++) {
+                boolean isNotMainObjectPixel = calculatePixelBrightness(maskFromModelBufferedImage, imageYIndex, imageXIndex) == 0;
+                int originalPixel = originalBufferedImage.getRGB(imageXIndex, imageYIndex);
+
+                int updatedPixel = getUpdatedPixel(originalPixel, isNotMainObjectPixel, pixelHighlightValue);
+
+                originalBufferedImage.setRGB(imageXIndex, imageYIndex, updatedPixel);
+            }
+        }
+
+        return originalBufferedImage;
+    }
+
+    private static int getUpdatedPixel(int originalPixel, boolean isNotMainObjectPixel, double pixelHighlightValue) {
+        if (!isNotMainObjectPixel) {
+            Color color = new Color(originalPixel, true);
+
+            final int newRed = Math.min(255, Math.max(0, (int) (color.getRed() * pixelHighlightValue)));
+            final int newGreen = Math.min(255, Math.max(0, (int) (color.getGreen() * pixelHighlightValue)));
+            final int newBlue = Math.min(255, Math.max(0, (int) (color.getBlue() * pixelHighlightValue)));
+            final int alpha = color.getAlpha();
+
+            Color dimmedColor = new Color(newRed, newGreen, newBlue, alpha);
+            originalPixel = dimmedColor.getRGB();
+        }
+
+        return originalPixel;
     }
 
     private int calculatePixelBrightness(BufferedImage source, int imageYIndex, int imageXIndex) {
         int rgb = source.getRGB(imageXIndex, imageYIndex);
-
         Color pixelColorRGB = new Color(rgb);
 
-        return pixelColorRGB.getRed();
+        return (pixelColorRGB.getRed() + pixelColorRGB.getGreen() + pixelColorRGB.getBlue()) / 3;
     }
 
-    private int calculateTotalBrightnessOfImage(BufferedImage grayScaleBufferImage){
-        int totalBrightness = 0;
+    private int calculateAverageBrightnessOfImage(BufferedImage grayScaleBufferImage, int matrixSize){
+        long totalBrightness = 0;
         for (int imageYIndex = 0; imageYIndex < grayScaleBufferImage.getHeight(); imageYIndex++) {
             for (int imageXIndex = 0; imageXIndex < grayScaleBufferImage.getWidth(); imageXIndex++) {
-                int brightness = calculatePixelBrightness(grayScaleBufferImage, imageYIndex, imageXIndex);
-                totalBrightness += brightness;
+                totalBrightness += calculatePixelBrightness(grayScaleBufferImage, imageYIndex, imageXIndex);
             }
         }
 
-        return totalBrightness;
+        int pixelCount = matrixSize * matrixSize;
+
+        return (int) (totalBrightness / pixelCount);
     }
 
     private BufferedImage generateBlackAndWhiteImage(BufferedImage grayScaleBufferImage, int threshold){
@@ -108,20 +213,52 @@ public class GenerateNonogramService {
     }
 
     private boolean[][] generateNonogram(BufferedImage blackAndWhiteImage){
-
         boolean[][] nonogram = new boolean[blackAndWhiteImage.getWidth()][blackAndWhiteImage.getHeight()];
 
-        for (int imageXIndex = 0; imageXIndex < blackAndWhiteImage.getHeight(); imageXIndex++) {
-            for (int imageYIndex = 0; imageYIndex < blackAndWhiteImage.getWidth(); imageYIndex++) {
+        for (int imageXIndex = 0; imageXIndex < blackAndWhiteImage.getWidth(); imageXIndex++) {
+            for (int imageYIndex = 0; imageYIndex < blackAndWhiteImage.getHeight(); imageYIndex++) {
                 int rgb = blackAndWhiteImage.getRGB(imageXIndex, imageYIndex);
+
                 Color color = new Color(rgb);
+                boolean isPixelBlack = (color.getRed() < 128);
 
-                boolean shouldPixelBeBlack = color.getRed() == 0 && color.getGreen() == 0 && color.getBlue() == 0;
-
-                nonogram[imageXIndex][imageYIndex] = shouldPixelBeBlack;
+                nonogram[imageXIndex][imageYIndex] = isPixelBlack;
             }
         }
 
         return nonogram;
+    }
+
+    private BufferedImage highlightOriginalImageBasedOnBlackAndWhiteImage(BufferedImage blackAndWhiteImage, BufferedImage originalImage, int threshold){
+        int width = originalImage.getWidth() / blackAndWhiteImage.getWidth();
+        int height = originalImage.getHeight() / blackAndWhiteImage.getHeight();
+
+        for (int blackAndWhiteImageXIndex = 0; blackAndWhiteImageXIndex < blackAndWhiteImage.getWidth(); blackAndWhiteImageXIndex++){
+            for (int blackAndWhiteImageYIndex = 0; blackAndWhiteImageYIndex < blackAndWhiteImage.getHeight(); blackAndWhiteImageYIndex++){
+
+                boolean isPixelBlack = calculatePixelBrightness(blackAndWhiteImage, blackAndWhiteImageYIndex, blackAndWhiteImageXIndex) < 128;
+
+                if (isPixelBlack){
+
+                    int coordinateXOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageXIndex*width;
+                    int coordinateYOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageYIndex*height;
+
+                    for (int originalImageXIndex = coordinateXOnOriginalBasedOnBlackAndWhiteImage; originalImageXIndex < coordinateXOnOriginalBasedOnBlackAndWhiteImage + width; originalImageXIndex++) {
+                        for (int originalImageYIndex = coordinateYOnOriginalBasedOnBlackAndWhiteImage; originalImageYIndex < coordinateYOnOriginalBasedOnBlackAndWhiteImage + height; originalImageYIndex++) {
+
+                            int originalPixel = originalImage.getRGB(originalImageXIndex, originalImageYIndex);
+
+                            double pixelHighlightValueBasedOnImageAverageBrightness = threshold < 128 ? 0.2 : 0.6;
+
+                            int updatedPixel = getUpdatedPixel(originalPixel, false, pixelHighlightValueBasedOnImageAverageBrightness);
+
+                            originalImage.setRGB(originalImageXIndex, originalImageYIndex, updatedPixel);
+                        }
+                    }
+                }
+            }
+        }
+
+        return originalImage;
     }
 }

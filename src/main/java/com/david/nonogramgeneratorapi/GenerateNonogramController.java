@@ -6,8 +6,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.IOException;
-
 @RestController
 @RequestMapping("api/v1/generate-nonogram")
 public class GenerateNonogramController {
@@ -19,7 +17,7 @@ public class GenerateNonogramController {
     }
 
     @PostMapping
-    public nonogramResponseDto generateNonogram(@RequestBody nonogramGenerationRequestDto requestDto) throws IOException {
-        return generateNonogramService.generateNonogram(requestDto);
+    public nonogramResponseDto generateNonogram(@RequestBody nonogramGenerationRequestDto requestDto) throws Exception {
+        return  generateNonogramService.generateNonogram(requestDto);
     }
 }
