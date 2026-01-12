@@ -89,9 +89,12 @@ public class GenerateNonogramService {
 
         boolean[][] nonogram = generateNonogram(blackAndWhiteBufferedImage);
 
-        BufferedImage originalImageDownscaledForPreview = Scalr.resize(originalBufferImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC,
-                400, Scalr.OP_ANTIALIAS);
+        BufferedImage originalImageDownscaledForPreview = originalBufferImage;
 
+        if (originalBufferImage.getHeight() > 500 | originalBufferImage.getWidth() > 500) {
+            originalImageDownscaledForPreview = Scalr.resize(originalBufferImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC,
+                    500, Scalr.OP_ANTIALIAS);
+        }
         File previewFile = new File(outputPath + "/previw.png");
         ImageIO.write(highlightOriginalImageBasedOnBlackAndWhiteImage(blackAndWhiteBufferedImage, originalImageDownscaledForPreview, threshold), "png", previewFile);
 
@@ -247,8 +250,8 @@ public class GenerateNonogramService {
                     int coordinateXOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageXIndex*pixelWidthRatio;
                     int coordinateYOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageYIndex*pixelHeightRatio;
 
-                    for (int originalImageXIndex = coordinateXOnOriginalBasedOnBlackAndWhiteImage; originalImageXIndex < coordinateXOnOriginalBasedOnBlackAndWhiteImage + pixelWidthRatio; originalImageXIndex++) {
-                        for (int originalImageYIndex = coordinateYOnOriginalBasedOnBlackAndWhiteImage; originalImageYIndex < coordinateYOnOriginalBasedOnBlackAndWhiteImage + pixelHeightRatio; originalImageYIndex++) {
+                    for (int originalImageXIndex = coordinateXOnOriginalBasedOnBlackAndWhiteImage; originalImageXIndex < coordinateXOnOriginalBasedOnBlackAndWhiteImage + pixelWidthRatio/2; originalImageXIndex++) {
+                        for (int originalImageYIndex = coordinateYOnOriginalBasedOnBlackAndWhiteImage; originalImageYIndex < coordinateYOnOriginalBasedOnBlackAndWhiteImage + pixelHeightRatio/2; originalImageYIndex++) {
 
                             int originalPixel = originalImage.getRGB(originalImageXIndex, originalImageYIndex);
 
