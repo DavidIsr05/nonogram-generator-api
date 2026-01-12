@@ -11,5 +11,6 @@ import java.io.Serializable;
 @NoArgsConstructor
 public class nonogramResponseDto implements Serializable {
     private boolean[][] nonogram;
-    private String blackAndWhiteImageBase64;
+    private String previewImageBase64;
+    private String completeNonogramImageBase64;
 }

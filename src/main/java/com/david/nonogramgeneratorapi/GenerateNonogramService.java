@@ -87,23 +87,27 @@ public class GenerateNonogramService {
 
         BufferedImage blackAndWhiteBufferedImage = generateBlackAndWhiteImage(grayScaleBufferImage, threshold);
 
-        File blackAndWhiteImageFile = new File(outputPath + "/black-and-white-image.png");
-        ImageIO.write(blackAndWhiteBufferedImage, "png", blackAndWhiteImageFile);
-
         boolean[][] nonogram = generateNonogram(blackAndWhiteBufferedImage);
 
-        File previewFile = new File(outputPath + "/opreviw.png");
-        ImageIO.write(highlightOriginalImageBasedOnBlackAndWhiteImage(blackAndWhiteBufferedImage, originalBufferImage, threshold), "png", previewFile);
+        BufferedImage originalImageDownscaledForPreview = Scalr.resize(originalBufferImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC,
+                400, Scalr.OP_ANTIALIAS);
+
+        File previewFile = new File(outputPath + "/previw.png");
+        ImageIO.write(highlightOriginalImageBasedOnBlackAndWhiteImage(blackAndWhiteBufferedImage, originalImageDownscaledForPreview, threshold), "png", previewFile);
 
         if (!originalImageFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + originalImageFile + " file with path: " + originalImageFile.getAbsolutePath());
-        if (!processedFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + processedFile + " file with path: " + originalImageFile.getAbsolutePath());
+        if (!processedFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + processedFile + " file with path: " + processedFile.getAbsolutePath());
 
-        byte[] fileContent = FileUtils.readFileToByteArray(blackAndWhiteImageFile);
-        String encodedString = Base64.getEncoder().encodeToString(fileContent);
+        byte[] previewFileContent = FileUtils.readFileToByteArray(previewFile);
+        String previewImageBase64 = Base64.getEncoder().encodeToString(previewFileContent);
 
-        if (!blackAndWhiteImageFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + blackAndWhiteImageFile + " file with path: " + originalImageFile.getAbsolutePath());
+        byte[] originalDownscaledFileContent = FileUtils.readFileToByteArray(originalDownscaledFile);
+        String originalDownscaledImageBase64 = Base64.getEncoder().encodeToString(originalDownscaledFileContent);
 
-        return new nonogramResponseDto(nonogram, encodedString);
+        if (!previewFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + previewFile + " file with path: " + previewFile.getAbsolutePath());
+        if (!originalDownscaledFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + originalDownscaledFile + " file with path: " + originalDownscaledFile.getAbsolutePath());
+
+        return new nonogramResponseDto(nonogram, previewImageBase64, originalDownscaledImageBase64);
     }
 
     private void detectMainObjectUsingModel(String inputPath, String outputPath) throws Exception {
@@ -230,8 +234,8 @@ public class GenerateNonogramService {
     }
 
     private BufferedImage highlightOriginalImageBasedOnBlackAndWhiteImage(BufferedImage blackAndWhiteImage, BufferedImage originalImage, int threshold){
-        int width = originalImage.getWidth() / blackAndWhiteImage.getWidth();
-        int height = originalImage.getHeight() / blackAndWhiteImage.getHeight();
+        int pixelWidthRatio = originalImage.getWidth() / blackAndWhiteImage.getWidth();
+        int pixelHeightRatio = originalImage.getHeight() / blackAndWhiteImage.getHeight();
 
         for (int blackAndWhiteImageXIndex = 0; blackAndWhiteImageXIndex < blackAndWhiteImage.getWidth(); blackAndWhiteImageXIndex++){
             for (int blackAndWhiteImageYIndex = 0; blackAndWhiteImageYIndex < blackAndWhiteImage.getHeight(); blackAndWhiteImageYIndex++){
@@ -240,11 +244,11 @@ public class GenerateNonogramService {
 
                 if (isPixelBlack){
 
-                    int coordinateXOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageXIndex*width;
-                    int coordinateYOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageYIndex*height;
+                    int coordinateXOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageXIndex*pixelWidthRatio;
+                    int coordinateYOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageYIndex*pixelHeightRatio;
 
-                    for (int originalImageXIndex = coordinateXOnOriginalBasedOnBlackAndWhiteImage; originalImageXIndex < coordinateXOnOriginalBasedOnBlackAndWhiteImage + width; originalImageXIndex++) {
-                        for (int originalImageYIndex = coordinateYOnOriginalBasedOnBlackAndWhiteImage; originalImageYIndex < coordinateYOnOriginalBasedOnBlackAndWhiteImage + height; originalImageYIndex++) {
+                    for (int originalImageXIndex = coordinateXOnOriginalBasedOnBlackAndWhiteImage; originalImageXIndex < coordinateXOnOriginalBasedOnBlackAndWhiteImage + pixelWidthRatio; originalImageXIndex++) {
+                        for (int originalImageYIndex = coordinateYOnOriginalBasedOnBlackAndWhiteImage; originalImageYIndex < coordinateYOnOriginalBasedOnBlackAndWhiteImage + pixelHeightRatio; originalImageYIndex++) {
 
                             int originalPixel = originalImage.getRGB(originalImageXIndex, originalImageYIndex);
 
