@@ -1,6 +1,8 @@
 package com.david.nonogramgeneratorapi;
 
-public class CouldNotLoadModelException extends Exception{
+import java.io.FileNotFoundException;
+
+public class CouldNotLoadModelException extends FileNotFoundException {
     CouldNotLoadModelException(String message){
         super((message));
     }

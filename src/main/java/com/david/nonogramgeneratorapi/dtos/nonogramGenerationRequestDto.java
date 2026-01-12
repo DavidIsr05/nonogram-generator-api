@@ -13,5 +13,5 @@ import java.io.Serializable;
 public class nonogramGenerationRequestDto implements Serializable {
     private String imageBase64;
     private Difficulty difficulty;
-    private float pixelHighlightValue;
+    private double pixelHighlightValue;
 }

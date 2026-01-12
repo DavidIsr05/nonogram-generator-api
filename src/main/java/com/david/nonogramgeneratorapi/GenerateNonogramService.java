@@ -92,16 +92,16 @@ public class GenerateNonogramService {
 
         boolean[][] nonogram = generateNonogram(blackAndWhiteBufferedImage);
 
-        File preview = new File(outputPath + "/opreviw.png");
-        ImageIO.write(highlightOriginalImageBasedOnBlackAndWhiteImage(blackAndWhiteBufferedImage, originalBufferImage, threshold), "png", preview);
+        File previewFile = new File(outputPath + "/opreviw.png");
+        ImageIO.write(highlightOriginalImageBasedOnBlackAndWhiteImage(blackAndWhiteBufferedImage, originalBufferImage, threshold), "png", previewFile);
 
-        if (!originalImageFile.delete()) throw new IOException("Could not delete " + originalImageFile + " file with path: " + originalImageFile.getAbsolutePath());
-        if (!processedFile.delete()) throw new IOException("Could not delete " + processedFile + " file with path: " + originalImageFile.getAbsolutePath());
+        if (!originalImageFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + originalImageFile + " file with path: " + originalImageFile.getAbsolutePath());
+        if (!processedFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + processedFile + " file with path: " + originalImageFile.getAbsolutePath());
 
         byte[] fileContent = FileUtils.readFileToByteArray(blackAndWhiteImageFile);
         String encodedString = Base64.getEncoder().encodeToString(fileContent);
 
-        if (!blackAndWhiteImageFile.delete()) throw new IOException("Could not delete " + blackAndWhiteImageFile + " file with path: " + originalImageFile.getAbsolutePath());
+        if (!blackAndWhiteImageFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + blackAndWhiteImageFile + " file with path: " + originalImageFile.getAbsolutePath());
 
         return new nonogramResponseDto(nonogram, encodedString);
     }
@@ -137,7 +137,7 @@ public class GenerateNonogramService {
         Imgcodecs.imwrite(outputPath, binaryMatOfMainObject);
     }
 
-    private BufferedImage applyMaskFromModel(File originalImageFile, BufferedImage maskFromModelBufferedImage, float milui) throws IOException {
+    private BufferedImage applyMaskFromModel(File originalImageFile, BufferedImage maskFromModelBufferedImage, double pixelHighlightValue) throws IOException {
 
         BufferedImage originalBufferedImage = ImageIO.read(originalImageFile);
 
@@ -146,7 +146,7 @@ public class GenerateNonogramService {
                 boolean isNotMainObjectPixel = calculatePixelBrightness(maskFromModelBufferedImage, imageYIndex, imageXIndex) == 0;
                 int originalPixel = originalBufferedImage.getRGB(imageXIndex, imageYIndex);
 
-                int updatedPixel = getUpdatedPixel(originalPixel, isNotMainObjectPixel, milui);
+                int updatedPixel = getUpdatedPixel(originalPixel, isNotMainObjectPixel, pixelHighlightValue);
 
                 originalBufferedImage.setRGB(imageXIndex, imageYIndex, updatedPixel);
             }
@@ -155,7 +155,7 @@ public class GenerateNonogramService {
         return originalBufferedImage;
     }
 
-    private static int getUpdatedPixel(int originalPixel, boolean isNotMainObjectPixel, float pixelHighlightValue) {
+    private static int getUpdatedPixel(int originalPixel, boolean isNotMainObjectPixel, double pixelHighlightValue) {
         if (!isNotMainObjectPixel) {
             Color color = new Color(originalPixel, true);
 
@@ -248,9 +248,9 @@ public class GenerateNonogramService {
 
                             int originalPixel = originalImage.getRGB(originalImageXIndex, originalImageYIndex);
 
-                            float pixelHighlightValue = threshold < 128 ? 0.2f : 0.6f;
+                            double pixelHighlightValueBasedOnImageAverageBrightness = threshold < 128 ? 0.2 : 0.6;
 
-                            int updatedPixel = getUpdatedPixel(originalPixel, false, pixelHighlightValue);
+                            int updatedPixel = getUpdatedPixel(originalPixel, false, pixelHighlightValueBasedOnImageAverageBrightness);
 
                             originalImage.setRGB(originalImageXIndex, originalImageYIndex, updatedPixel);
                         }
