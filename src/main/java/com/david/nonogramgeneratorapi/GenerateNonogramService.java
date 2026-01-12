@@ -62,7 +62,7 @@ public class GenerateNonogramService {
         File processedFile = new File(maskedImagePath);
         BufferedImage maskFromModelBufferedImage = ImageIO.read(processedFile);
 
-        BufferedImage modifiedBufferedImage = applyMaskFromModel(originalImageFile.getAbsoluteFile(), maskFromModelBufferedImage);
+        BufferedImage modifiedBufferedImage = applyMaskFromModel(originalImageFile.getAbsoluteFile(), maskFromModelBufferedImage, requestBody.getPixelHighlightValue());
 
         int matrixSize = requestBody.getDifficulty().getMatrixSize();
 
@@ -71,6 +71,9 @@ public class GenerateNonogramService {
 
         BufferedImage originalScaled = Scalr.resize(originalBufferImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
                 matrixSize, Scalr.OP_ANTIALIAS);
+
+        File originalDownscaledFile = new File(outputPath + "/original-downscaled.png");
+        ImageIO.write(originalScaled, "png", originalDownscaledFile);
 
         BufferedImage grayScaleBufferImage = new BufferedImage(matrixSize, matrixSize, BufferedImage.TYPE_BYTE_GRAY);
         Graphics graphics = grayScaleBufferImage.getGraphics();
@@ -88,6 +91,9 @@ public class GenerateNonogramService {
         ImageIO.write(blackAndWhiteBufferedImage, "png", blackAndWhiteImageFile);
 
         boolean[][] nonogram = generateNonogram(blackAndWhiteBufferedImage);
+
+        File preview = new File(outputPath + "/opreviw.png");
+        ImageIO.write(highlightOriginalImageBasedOnBlackAndWhiteImage(blackAndWhiteBufferedImage, originalBufferImage, threshold), "png", preview);
 
         if (!originalImageFile.delete()) throw new IOException("Could not delete " + originalImageFile + " file with path: " + originalImageFile.getAbsolutePath());
         if (!processedFile.delete()) throw new IOException("Could not delete " + processedFile + " file with path: " + originalImageFile.getAbsolutePath());
@@ -131,7 +137,7 @@ public class GenerateNonogramService {
         Imgcodecs.imwrite(outputPath, binaryMatOfMainObject);
     }
 
-    private BufferedImage applyMaskFromModel(File originalImageFile, BufferedImage maskFromModelBufferedImage) throws IOException {
+    private BufferedImage applyMaskFromModel(File originalImageFile, BufferedImage maskFromModelBufferedImage, float milui) throws IOException {
 
         BufferedImage originalBufferedImage = ImageIO.read(originalImageFile);
 
@@ -140,7 +146,7 @@ public class GenerateNonogramService {
                 boolean isNotMainObjectPixel = calculatePixelBrightness(maskFromModelBufferedImage, imageYIndex, imageXIndex) == 0;
                 int originalPixel = originalBufferedImage.getRGB(imageXIndex, imageYIndex);
 
-                int updatedPixel = getUpdatedPixel(originalPixel, isNotMainObjectPixel);
+                int updatedPixel = getUpdatedPixel(originalPixel, isNotMainObjectPixel, milui);
 
                 originalBufferedImage.setRGB(imageXIndex, imageYIndex, updatedPixel);
             }
@@ -149,13 +155,13 @@ public class GenerateNonogramService {
         return originalBufferedImage;
     }
 
-    private static int getUpdatedPixel(int originalPixel, boolean isNotMainObjectPixel) {
+    private static int getUpdatedPixel(int originalPixel, boolean isNotMainObjectPixel, float pixelHighlightValue) {
         if (!isNotMainObjectPixel) {
             Color color = new Color(originalPixel, true);
 
-            final int newRed = Math.min(255, Math.max(0, (int) (color.getRed() * 0.2)));
-            final int newGreen = Math.min(255, Math.max(0, (int) (color.getGreen() * 0.2)));
-            final int newBlue = Math.min(255, Math.max(0, (int) (color.getBlue() * 0.2)));
+            final int newRed = Math.min(255, Math.max(0, (int) (color.getRed() * pixelHighlightValue)));
+            final int newGreen = Math.min(255, Math.max(0, (int) (color.getGreen() * pixelHighlightValue)));
+            final int newBlue = Math.min(255, Math.max(0, (int) (color.getBlue() * pixelHighlightValue)));
             final int alpha = color.getAlpha();
 
             Color dimmedColor = new Color(newRed, newGreen, newBlue, alpha);
@@ -221,5 +227,38 @@ public class GenerateNonogramService {
         }
 
         return nonogram;
+    }
+
+    private BufferedImage highlightOriginalImageBasedOnBlackAndWhiteImage(BufferedImage blackAndWhiteImage, BufferedImage originalImage, int threshold){
+        int width = originalImage.getWidth() / blackAndWhiteImage.getWidth();
+        int height = originalImage.getHeight() / blackAndWhiteImage.getHeight();
+
+        for (int blackAndWhiteImageXIndex = 0; blackAndWhiteImageXIndex < blackAndWhiteImage.getWidth(); blackAndWhiteImageXIndex++){
+            for (int blackAndWhiteImageYIndex = 0; blackAndWhiteImageYIndex < blackAndWhiteImage.getHeight(); blackAndWhiteImageYIndex++){
+
+                boolean isPixelBlack = calculatePixelBrightness(blackAndWhiteImage, blackAndWhiteImageYIndex, blackAndWhiteImageXIndex) < 128;
+
+                if (isPixelBlack){
+
+                    int coordinateXOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageXIndex*width;
+                    int coordinateYOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageYIndex*height;
+
+                    for (int originalImageXIndex = coordinateXOnOriginalBasedOnBlackAndWhiteImage; originalImageXIndex < coordinateXOnOriginalBasedOnBlackAndWhiteImage + width; originalImageXIndex++) {
+                        for (int originalImageYIndex = coordinateYOnOriginalBasedOnBlackAndWhiteImage; originalImageYIndex < coordinateYOnOriginalBasedOnBlackAndWhiteImage + height; originalImageYIndex++) {
+
+                            int originalPixel = originalImage.getRGB(originalImageXIndex, originalImageYIndex);
+
+                            float pixelHighlightValue = threshold < 128 ? 0.2f : 0.6f;
+
+                            int updatedPixel = getUpdatedPixel(originalPixel, false, pixelHighlightValue);
+
+                            originalImage.setRGB(originalImageXIndex, originalImageYIndex, updatedPixel);
+                        }
+                    }
+                }
+            }
+        }
+
+        return originalImage;
     }
 }
