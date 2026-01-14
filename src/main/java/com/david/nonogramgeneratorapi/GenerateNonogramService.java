@@ -12,8 +12,7 @@ import org.opencv.imgproc.Imgproc;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
-import java.awt.Color;
-import java.awt.Graphics;
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -240,6 +239,14 @@ public class GenerateNonogramService {
         int pixelWidthRatio = originalImage.getWidth() / blackAndWhiteImage.getWidth();
         int pixelHeightRatio = originalImage.getHeight() / blackAndWhiteImage.getHeight();
 
+        BufferedImage previewOverlayBufferImage = new BufferedImage(originalImage.getWidth(), originalImage.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+
+        Graphics2D g2d = previewOverlayBufferImage.createGraphics();
+        g2d.setComposite(AlphaComposite.Clear);
+        g2d.fillRect(0, 0, previewOverlayBufferImage.getWidth(), previewOverlayBufferImage.getHeight());
+
+
         for (int blackAndWhiteImageXIndex = 0; blackAndWhiteImageXIndex < blackAndWhiteImage.getWidth(); blackAndWhiteImageXIndex++){
             for (int blackAndWhiteImageYIndex = 0; blackAndWhiteImageYIndex < blackAndWhiteImage.getHeight(); blackAndWhiteImageYIndex++){
 
@@ -250,22 +257,16 @@ public class GenerateNonogramService {
                     int coordinateXOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageXIndex*pixelWidthRatio;
                     int coordinateYOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageYIndex*pixelHeightRatio;
 
-                    for (int originalImageXIndex = coordinateXOnOriginalBasedOnBlackAndWhiteImage; originalImageXIndex < coordinateXOnOriginalBasedOnBlackAndWhiteImage + pixelWidthRatio/2; originalImageXIndex++) {
-                        for (int originalImageYIndex = coordinateYOnOriginalBasedOnBlackAndWhiteImage; originalImageYIndex < coordinateYOnOriginalBasedOnBlackAndWhiteImage + pixelHeightRatio/2; originalImageYIndex++) {
+                    float pixelHighlightValueBasedOnImageAverageBrightness = threshold < 128 ? 0.2f : 0.6f;
 
-                            int originalPixel = originalImage.getRGB(originalImageXIndex, originalImageYIndex);
-
-                            double pixelHighlightValueBasedOnImageAverageBrightness = threshold < 128 ? 0.2 : 0.6;
-
-                            int updatedPixel = getUpdatedPixel(originalPixel, false, pixelHighlightValueBasedOnImageAverageBrightness);
-
-                            originalImage.setRGB(originalImageXIndex, originalImageYIndex, updatedPixel);
-                        }
-                    }
+                    g2d.setColor(Color.RED);
+                    g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, pixelHighlightValueBasedOnImageAverageBrightness));
+                    g2d.drawOval(coordinateXOnOriginalBasedOnBlackAndWhiteImage, coordinateYOnOriginalBasedOnBlackAndWhiteImage, pixelWidthRatio, pixelHeightRatio);
                 }
             }
         }
+        g2d.dispose();
 
-        return originalImage;
+        return previewOverlayBufferImage;
     }
 }
