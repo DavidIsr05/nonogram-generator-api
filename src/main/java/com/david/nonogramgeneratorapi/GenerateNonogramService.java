@@ -124,7 +124,7 @@ public class GenerateNonogramService {
             blackAndWhiteBufferedImage,
             originalImageDownscaledForPreview,
             threshold,
-            requestBody.getPreviewImageHighlightColor()),
+            requestBody.getPreviewImageHighlightColor().getColor()),
         "png",
         previewFile);
 
