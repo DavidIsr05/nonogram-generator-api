@@ -5,7 +5,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
-import java.awt.*;
 import java.io.Serializable;
 
 @Data
@@ -15,5 +14,5 @@ public class nonogramGenerationRequestDto implements Serializable {
     private String imageBase64;
     private Difficulty difficulty;
     private double mainObjectDimFactor;
-    //private Color previewImageHighlightColor;
+    private int previewImageHighlightColor;
 }

@@ -23,8 +23,11 @@ public class GenerateNonogramService {
     final String MODEL_PATH = "src/main/resources/u2net.onnx";
 
     static {
+
+        File file = new File("src/main/resources/libopencv_java4120.dylib");
+
         try {
-            System.load("/Users/david/Documents/nonogramGeneratorAPI/src/main/resources/libopencv_java4120.dylib"); // TODO change the dir so it will work in container also
+            System.load(file.getAbsolutePath());
         } catch (UnsatisfiedLinkError e) {
             throw new UnsatisfiedLinkError("Can't load openCV jar files. Error message: " + e);
         }
@@ -40,7 +43,6 @@ public class GenerateNonogramService {
 
     public nonogramResponseDto generateNonogram(nonogramGenerationRequestDto requestBody) throws Exception {
         byte[] originalImageAsBytes = Base64.getDecoder().decode(requestBody.getImageBase64());
-        final String OUTPUT_PATH = "src/main/resources/";
 
         ByteArrayInputStream originalImageAsByteArrayStream = new ByteArrayInputStream(originalImageAsBytes);
 
@@ -75,17 +77,7 @@ public class GenerateNonogramService {
             downscaledOriginalImageForPreview = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC, 500, Scalr.OP_ANTIALIAS);
         }
 
-        BufferedImage previewImage = highlightOriginalImageBasedOnBlackAndWhiteImage(nonogram, downscaledOriginalImageForPreview, threshold);
-
-        writeBufferedImageToFile("preview", previewImage, OUTPUT_PATH);
-
-        writeBufferedImageToFile("mask", mainObjectFromModel, OUTPUT_PATH);
-
-        writeBufferedImageToFile("dimmed", originalImageWithDimmedMainObject, OUTPUT_PATH);
-
-        BufferedImage baw = generateBlackAndWhiteImage(grayScaledImage, threshold);
-
-        writeBufferedImageToFile("black", baw, OUTPUT_PATH);
+        BufferedImage previewImage = highlightOriginalImageBasedOnBlackAndWhiteImage(nonogram, downscaledOriginalImageForPreview, threshold, requestBody.getPreviewImageHighlightColor());
 
         String previewImageBase64 = bufferedImageToBase64(previewImage);
 
@@ -199,12 +191,14 @@ public class GenerateNonogramService {
         return nonogram;
     }
 
-    private BufferedImage highlightOriginalImageBasedOnBlackAndWhiteImage(boolean[][] nonogram, BufferedImage originalImage, int threshold) {
+    private BufferedImage highlightOriginalImageBasedOnBlackAndWhiteImage(boolean[][] nonogram, BufferedImage originalImage, int threshold, int previewImageHighlightColor) {
         int pixelWidthRatio = originalImage.getWidth() / nonogram.length;
         int pixelHeightRatio = originalImage.getHeight() / nonogram.length;
 
         int width = originalImage.getWidth();
         int height = originalImage.getHeight();
+
+        Color highlightColor = new Color(previewImageHighlightColor);
 
         BufferedImage previewImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 
@@ -227,8 +221,8 @@ public class GenerateNonogramService {
 
                     float previewImageOpacityBasedOnOriginalImageAverageBrightness = threshold < blackAndWhitePixelThreshold ? highDimFactor : lowDimFactor;
 
-                    g2d.setColor(Color.BLACK);
-                    g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, previewImageOpacityBasedOnOriginalImageAverageBrightness)); //TODO color from color
+                    g2d.setColor(highlightColor);
+                    g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, previewImageOpacityBasedOnOriginalImageAverageBrightness));
                     g2d.drawOval(coordinateXOnOriginalBasedOnNonogram, coordinateYOnOriginalBasedOnNonogram, pixelWidthRatio, pixelHeightRatio);
                 }
             }
@@ -236,13 +230,6 @@ public class GenerateNonogramService {
         g2d.dispose();
 
         return previewImage;
-    }
-
-    private void writeBufferedImageToFile(String fileName, BufferedImage bufferedImage, String outputPath) throws IOException {
-
-        File file = new File(outputPath + "/" + fileName + ".png");
-        ImageIO.write(bufferedImage, "png", file);
-
     }
 
     public static Mat bufferedImageToMat(BufferedImage inputImage) {
@@ -280,26 +267,5 @@ public class GenerateNonogramService {
         byte[] imageBytes = inputImageInByteArray.toByteArray();
 
         return Base64.getEncoder().encodeToString(imageBytes);
-    }
-
-    private BufferedImage generateBlackAndWhiteImage(BufferedImage grayScaleBufferImage, int threshold){
-        BufferedImage blackAndWhiteImage = new BufferedImage(
-                grayScaleBufferImage.getWidth(),
-                grayScaleBufferImage.getHeight(),
-                BufferedImage.TYPE_BYTE_BINARY
-        );
-
-        int whiteColor = 0xFFFFFF;
-        int blackColor = 0x000000;
-
-        for (int imageXIndex = 0; imageXIndex < grayScaleBufferImage.getHeight(); imageXIndex++) {
-            for (int imageYIndex = 0; imageYIndex < grayScaleBufferImage.getWidth(); imageYIndex++) {
-                int brightness = calculatePixelBrightness(grayScaleBufferImage, imageXIndex, imageYIndex);
-                int newPixel = (brightness >= threshold) ? whiteColor : blackColor;
-                blackAndWhiteImage.setRGB(imageXIndex, imageYIndex, newPixel);
-            }
-        }
-
-        return blackAndWhiteImage;
     }
 }
