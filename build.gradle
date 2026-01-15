@@ -29,7 +29,7 @@ dependencies {
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")
     implementation("org.openpnp:opencv:4.9.0-0")
-    implementation fileTree(dir: '/Users/david/Documents/nonogramGeneratorAPI/src/main/resources', includes: ['*.jar']) // TODO change the dir so it will work in container also
+    implementation fileTree(dir: 'src/main/resources', includes: ['*.jar'])
 }
 
 tasks.named('test') {
