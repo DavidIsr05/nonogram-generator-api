@@ -77,7 +77,15 @@ public class GenerateNonogramService {
 
         BufferedImage previewImage = highlightOriginalImageBasedOnBlackAndWhiteImage(nonogram, downscaledOriginalImageForPreview, threshold);
 
-        writeBufferedImageToFile("idk", previewImage, OUTPUT_PATH);
+        writeBufferedImageToFile("preview", previewImage, OUTPUT_PATH);
+
+        writeBufferedImageToFile("mask", mainObjectFromModel, OUTPUT_PATH);
+
+        writeBufferedImageToFile("dimmed", originalImageWithDimmedMainObject, OUTPUT_PATH);
+
+        BufferedImage baw = generateBlackAndWhiteImage(grayScaledImage, threshold);
+
+        writeBufferedImageToFile("black", baw, OUTPUT_PATH);
 
         String previewImageBase64 = bufferedImageToBase64(previewImage);
 
@@ -118,8 +126,8 @@ public class GenerateNonogramService {
         g.drawImage(originalImage, 0, 0, null);
         g.dispose();
 
-        for (int imageXIndex = 0; imageXIndex < mainObjectFromModel.getHeight(); imageXIndex++) {
-            for (int imageYIndex = 0; imageYIndex < mainObjectFromModel.getWidth(); imageYIndex++) {
+        for (int imageXIndex = 0; imageXIndex < mainObjectFromModel.getWidth(); imageXIndex++) {
+            for (int imageYIndex = 0; imageYIndex < mainObjectFromModel.getHeight(); imageYIndex++) {
                 boolean isMainObjectPixel = calculatePixelBrightness(mainObjectFromModel, imageXIndex, imageYIndex) != 0;
                 int originalPixel = duplicatedOriginalImage.getRGB(imageXIndex, imageYIndex);
 
@@ -272,5 +280,26 @@ public class GenerateNonogramService {
         byte[] imageBytes = inputImageInByteArray.toByteArray();
 
         return Base64.getEncoder().encodeToString(imageBytes);
+    }
+
+    private BufferedImage generateBlackAndWhiteImage(BufferedImage grayScaleBufferImage, int threshold){
+        BufferedImage blackAndWhiteImage = new BufferedImage(
+                grayScaleBufferImage.getWidth(),
+                grayScaleBufferImage.getHeight(),
+                BufferedImage.TYPE_BYTE_BINARY
+        );
+
+        int whiteColor = 0xFFFFFF;
+        int blackColor = 0x000000;
+
+        for (int imageXIndex = 0; imageXIndex < grayScaleBufferImage.getHeight(); imageXIndex++) {
+            for (int imageYIndex = 0; imageYIndex < grayScaleBufferImage.getWidth(); imageYIndex++) {
+                int brightness = calculatePixelBrightness(grayScaleBufferImage, imageXIndex, imageYIndex);
+                int newPixel = (brightness >= threshold) ? whiteColor : blackColor;
+                blackAndWhiteImage.setRGB(imageXIndex, imageYIndex, newPixel);
+            }
+        }
+
+        return blackAndWhiteImage;
     }
 }
