@@ -3,31 +3,43 @@ package com.david.nonogramgeneratorapi;
 import com.david.nonogramgeneratorapi.dtos.*;
 import jakarta.annotation.PostConstruct;
 import org.imgscalr.Scalr;
-import org.opencv.core.*;
+import org.opencv.core.CvType;
+import org.opencv.core.Mat;
+import org.opencv.core.Scalar;
+import org.opencv.core.Size;
 import org.opencv.dnn.Dnn;
 import org.opencv.dnn.Net;
 import org.opencv.imgproc.Imgproc;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
-import java.awt.*;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
-import java.io.*;
+import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.util.Base64;
+
+import static com.david.nonogramgeneratorapi.util.PixelUtils.*;
 
 @Service
 public class GenerateNonogramService {
 
-    private Net modelModule;
+    private Net u2netModel;
     final String MODEL_PATH = "src/main/resources/u2net.onnx";
 
     static {
 
-        File algorithmLibraryFile = new File("src/main/resources/libopencv_java4120.dylib");
+        final File ALGORITHM_LIBRARY_FILE = new File("src/main/resources/libopencv_java4120.dylib");
 
         try {
-            System.load(algorithmLibraryFile.getAbsolutePath());
+            System.load(ALGORITHM_LIBRARY_FILE.getAbsolutePath());
         } catch (UnsatisfiedLinkError e) {
             throw new UnsatisfiedLinkError("Can't load openCV jar files. Error message: " + e);
         }
@@ -35,9 +47,9 @@ public class GenerateNonogramService {
 
     @PostConstruct
     public void initModel() {
-        modelModule = Dnn.readNetFromONNX(MODEL_PATH);
-        if (modelModule.empty()) {
-            throw new RuntimeException(new CouldNotLoadModelException("Could not load model. Model variable empty after trying to load it."));
+        u2netModel = Dnn.readNetFromONNX(MODEL_PATH);
+        if (u2netModel.empty()) {
+            throw new RuntimeException(new CouldNotLoadModelException());
         }
     }
 
@@ -48,13 +60,13 @@ public class GenerateNonogramService {
 
         BufferedImage originalImage = ImageIO.read(originalImageAsByteArrayStream);
 
-        BufferedImage mainObjectFromModel = detectMainObjectUsingModel(originalImage);
+        BufferedImage mainObjectFromModel = detectMainObject(originalImage);
 
-        BufferedImage originalImageWithDimmedMainObject = applyDimFactorToImageUsingMainObjectFromModel(originalImage, mainObjectFromModel, requestBody.getMainObjectDimFactor());
+        BufferedImage dimmedImage = applyDimFactor(originalImage, mainObjectFromModel, requestBody.getMainObjectDimFactor());
 
         int matrixSize = requestBody.getDifficulty().getMatrixSize();
 
-        BufferedImage downScaledImageWithDimmedMainObject = Scalr.resize(originalImageWithDimmedMainObject, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT, matrixSize, Scalr.OP_ANTIALIAS);
+        BufferedImage downscaledDimmedImage = Scalr.resize(dimmedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT, matrixSize, Scalr.OP_ANTIALIAS);
 
         BufferedImage downscaledOriginalImage = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT, matrixSize, Scalr.OP_ANTIALIAS);
 
@@ -62,22 +74,24 @@ public class GenerateNonogramService {
 
         Graphics graphics = grayScaledImage.getGraphics();
 
-        graphics.setColor(java.awt.Color.WHITE);
+        graphics.setColor(Color.WHITE);
         graphics.fillRect(0, 0, matrixSize, matrixSize);
-        graphics.drawImage(downScaledImageWithDimmedMainObject, 0, 0, null);
+        graphics.drawImage(downscaledDimmedImage, 0, 0, null);
         graphics.dispose();
 
-        int threshold = calculateAverageBrightnessOfImage(downscaledOriginalImage, matrixSize);
+        int threshold = calculateAverageBrightness(downscaledOriginalImage, matrixSize);
 
         boolean[][] nonogram = generateNonogram(grayScaledImage, threshold);
 
         BufferedImage downscaledOriginalImageForPreview = originalImage;
 
-        if (originalImage.getHeight() > 500 | originalImage.getWidth() > 500) {
-            downscaledOriginalImageForPreview = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC, 500, Scalr.OP_ANTIALIAS);
+        final int SMALL_IMAGE_RESOLUTION = 500;
+
+        if (originalImage.getHeight() > SMALL_IMAGE_RESOLUTION | originalImage.getWidth() > SMALL_IMAGE_RESOLUTION) {
+            downscaledOriginalImageForPreview = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC, SMALL_IMAGE_RESOLUTION, Scalr.OP_ANTIALIAS);
         }
 
-        BufferedImage previewImage = highlightOriginalImageBasedOnBlackAndWhiteImage(nonogram, downscaledOriginalImageForPreview, threshold, requestBody.getPreviewImageHighlightColorIntRGB());
+        BufferedImage previewImage = createPreview(nonogram, downscaledOriginalImageForPreview, threshold, requestBody.getPreviewImageIntRGB());
 
         String previewImageBase64 = bufferedImageToBase64(previewImage);
 
@@ -86,16 +100,16 @@ public class GenerateNonogramService {
         return new nonogramResponseDto(nonogram, previewImageBase64, downscaledOriginalImageForCompletedNonogramsBase64, requestBody.getMainObjectDimFactor(), requestBody.getDifficulty());
     }
 
-    private BufferedImage detectMainObjectUsingModel(BufferedImage inputImage) throws Exception {
+    private BufferedImage detectMainObject(BufferedImage inputImage) throws Exception {
         Mat inputImageInMatFormat = bufferedImageToMat(inputImage);
 
-        if (inputImageInMatFormat.empty())
+        if (inputImageInMatFormat.empty()) {
             throw new FileNotFoundException("Problem while loading original image for model in: 'detectMainObjectUsingModel'");
-
+        }
         Mat mainObjectFromModel = Dnn.blobFromImage(inputImageInMatFormat, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
-        modelModule.setInput(mainObjectFromModel);
+        u2netModel.setInput(mainObjectFromModel);
 
-        Mat originalMatOfMainObject = modelModule.forward();
+        Mat originalMatOfMainObject = u2netModel.forward();
 
         Mat reshapedMatOfMainObject = originalMatOfMainObject.reshape(1, 250);
 
@@ -105,18 +119,20 @@ public class GenerateNonogramService {
 
         Mat binaryMatOfMainObject = new Mat();
 
-        Imgproc.threshold(resizedMatOfMainObjectBasedOnOriginalInputImage, binaryMatOfMainObject, 0.5, 1, Imgproc.THRESH_BINARY);
+        final double binaryImageCreationThreshold = 0.5;
+
+        Imgproc.threshold(resizedMatOfMainObjectBasedOnOriginalInputImage, binaryMatOfMainObject, binaryImageCreationThreshold, 1, Imgproc.THRESH_BINARY);
 
         binaryMatOfMainObject.convertTo(binaryMatOfMainObject, CvType.CV_8U, 255);
 
         return matToBufferedImage(binaryMatOfMainObject);
     }
 
-    private BufferedImage applyDimFactorToImageUsingMainObjectFromModel(BufferedImage originalImage, BufferedImage mainObjectFromModel, double dimFactor) {
+    private BufferedImage applyDimFactor(BufferedImage originalImage, BufferedImage mainObjectFromModel, double dimFactor) {
         BufferedImage duplicatedOriginalImage = new BufferedImage(originalImage.getWidth(), originalImage.getHeight(), originalImage.getType());
-        Graphics g = duplicatedOriginalImage.getGraphics();
-        g.drawImage(originalImage, 0, 0, null);
-        g.dispose();
+        Graphics graphics = duplicatedOriginalImage.getGraphics();
+        graphics.drawImage(originalImage, 0, 0, null);
+        graphics.dispose();
 
         for (int imageXIndex = 0; imageXIndex < mainObjectFromModel.getWidth(); imageXIndex++) {
             for (int imageYIndex = 0; imageYIndex < mainObjectFromModel.getHeight(); imageYIndex++) {
@@ -130,49 +146,6 @@ public class GenerateNonogramService {
         }
 
         return duplicatedOriginalImage;
-    }
-
-    private int getUpdatedPixel(int originalPixel, boolean isMainObjectPixel, double dimFactor) {
-        if (isMainObjectPixel) {
-            Color color = new Color(originalPixel, true);
-
-            final int newRed = getUpdatedPixelColor(color.getRed(), dimFactor);
-            final int newGreen = getUpdatedPixelColor(color.getGreen(), dimFactor);
-            final int newBlue = getUpdatedPixelColor(color.getBlue(), dimFactor);
-            final int alpha = color.getAlpha();
-
-            Color dimmedColor = new Color(newRed, newGreen, newBlue, alpha);
-            originalPixel = dimmedColor.getRGB();
-        }
-
-        return originalPixel;
-    }
-
-    private int getUpdatedPixelColor(int RGBColor, double dimFactor){
-        final int maxPixelColorValue = 255;
-
-        return Math.min(maxPixelColorValue, Math.max(0, (int) (RGBColor * dimFactor)));
-    }
-
-    private int calculatePixelBrightness(BufferedImage inputImage, int imageXIndex, int imageYIndex) {
-        int rgb = inputImage.getRGB(imageXIndex, imageYIndex);
-        Color pixelColorRGB = new Color(rgb);
-
-        return (pixelColorRGB.getRed() + pixelColorRGB.getGreen() + pixelColorRGB.getBlue()) / 3;
-    }
-
-    private int calculateAverageBrightnessOfImage(BufferedImage grayScaledImage, int matrixSize) {
-        long totalBrightness = 0;
-
-        for (int imageXIndex = 0; imageXIndex < grayScaledImage.getHeight(); imageXIndex++) {
-            for (int imageYIndex = 0; imageYIndex < grayScaledImage.getWidth(); imageYIndex++) {
-                totalBrightness += calculatePixelBrightness(grayScaledImage, imageXIndex, imageYIndex);
-            }
-        }
-
-        int pixelCount = (int) Math.pow(matrixSize, 2);
-
-        return (int) (totalBrightness / pixelCount);
     }
 
     private boolean[][] generateNonogram(BufferedImage grayScaledImage, int threshold) {
@@ -191,20 +164,20 @@ public class GenerateNonogramService {
         return nonogram;
     }
 
-    private BufferedImage highlightOriginalImageBasedOnBlackAndWhiteImage(boolean[][] nonogram, BufferedImage originalImage, int threshold, int previewImageHighlightColorIntRGB) {
+    private BufferedImage createPreview(boolean[][] nonogram, BufferedImage originalImage, int threshold, int previewImageIntRGB) {
         int pixelWidthRatio = originalImage.getWidth() / nonogram.length;
         int pixelHeightRatio = originalImage.getHeight() / nonogram.length;
 
         int width = originalImage.getWidth();
         int height = originalImage.getHeight();
 
-        Color highlightColor = new Color(previewImageHighlightColorIntRGB);
+        Color highlightColor = new Color(previewImageIntRGB);
 
         BufferedImage previewImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 
-        Graphics2D g2d = previewImage.createGraphics();
-        g2d.setComposite(AlphaComposite.Clear);
-        g2d.fillRect(0, 0, width, height);
+        Graphics2D graphics2d = previewImage.createGraphics();
+        graphics2d.setComposite(AlphaComposite.Clear);
+        graphics2d.fillRect(0, 0, width, height);
 
         final float highDimFactor = 0.2f;
         final float lowDimFactor = 0.6f;
@@ -219,15 +192,15 @@ public class GenerateNonogramService {
                     int coordinateXOnOriginalBasedOnNonogram = nonogramXIndex * pixelWidthRatio;
                     int coordinateYOnOriginalBasedOnNonogram = nonogramYIndex * pixelHeightRatio;
 
-                    float previewImageOpacityBasedOnOriginalImageAverageBrightness = threshold < blackAndWhitePixelThreshold ? highDimFactor : lowDimFactor;
+                    float previewOpacity = threshold < blackAndWhitePixelThreshold ? highDimFactor : lowDimFactor;
 
-                    g2d.setColor(highlightColor);
-                    g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, previewImageOpacityBasedOnOriginalImageAverageBrightness));
-                    g2d.drawOval(coordinateXOnOriginalBasedOnNonogram, coordinateYOnOriginalBasedOnNonogram, pixelWidthRatio, pixelHeightRatio);
+                    graphics2d.setColor(highlightColor);
+                    graphics2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, previewOpacity));
+                    graphics2d.drawOval(coordinateXOnOriginalBasedOnNonogram, coordinateYOnOriginalBasedOnNonogram, pixelWidthRatio, pixelHeightRatio);
                 }
             }
         }
-        g2d.dispose();
+        graphics2d.dispose();
 
         return previewImage;
     }
