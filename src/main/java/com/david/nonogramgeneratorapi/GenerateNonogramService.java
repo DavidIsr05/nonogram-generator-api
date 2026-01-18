@@ -77,7 +77,7 @@ public class GenerateNonogramService {
             downscaledOriginalImageForPreview = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC, 500, Scalr.OP_ANTIALIAS);
         }
 
-        BufferedImage previewImage = highlightOriginalImageBasedOnBlackAndWhiteImage(nonogram, downscaledOriginalImageForPreview, threshold, requestBody.getPreviewImageHighlightColor());
+        BufferedImage previewImage = highlightOriginalImageBasedOnBlackAndWhiteImage(nonogram, downscaledOriginalImageForPreview, threshold, requestBody.getPreviewImageHighlightColorIntRGB());
 
         String previewImageBase64 = bufferedImageToBase64(previewImage);
 
@@ -149,7 +149,7 @@ public class GenerateNonogramService {
     }
 
     private int getUpdatedPixelColor(int RGBColor, double dimFactor){
-        int maxPixelColorValue = 255;
+        final int maxPixelColorValue = 255;
 
         return Math.min(maxPixelColorValue, Math.max(0, (int) (RGBColor * dimFactor)));
     }
@@ -191,14 +191,14 @@ public class GenerateNonogramService {
         return nonogram;
     }
 
-    private BufferedImage highlightOriginalImageBasedOnBlackAndWhiteImage(boolean[][] nonogram, BufferedImage originalImage, int threshold, int previewImageHighlightColor) {
+    private BufferedImage highlightOriginalImageBasedOnBlackAndWhiteImage(boolean[][] nonogram, BufferedImage originalImage, int threshold, int previewImageHighlightColorIntRGB) {
         int pixelWidthRatio = originalImage.getWidth() / nonogram.length;
         int pixelHeightRatio = originalImage.getHeight() / nonogram.length;
 
         int width = originalImage.getWidth();
         int height = originalImage.getHeight();
 
-        Color highlightColor = new Color(previewImageHighlightColor);
+        Color highlightColor = new Color(previewImageHighlightColorIntRGB);
 
         BufferedImage previewImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 

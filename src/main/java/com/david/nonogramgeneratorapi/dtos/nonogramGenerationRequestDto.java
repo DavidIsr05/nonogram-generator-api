@@ -14,5 +14,5 @@ public class nonogramGenerationRequestDto implements Serializable {
     private String imageBase64;
     private Difficulty difficulty;
     private double mainObjectDimFactor;
-    private int previewImageHighlightColor;
+    private int previewImageHighlightColorIntRGB;
 }
