@@ -1,6 +1,7 @@
 package com.david.nonogramgeneratorapi;
 
 import com.david.nonogramgeneratorapi.dtos.*;
+import com.david.nonogramgeneratorapi.util.PixelUtils;
 import jakarta.annotation.PostConstruct;
 import org.imgscalr.Scalr;
 import org.opencv.core.CvType;
@@ -26,13 +27,13 @@ import java.io.IOException;
 import java.io.ByteArrayOutputStream;
 import java.util.Base64;
 
-import static com.david.nonogramgeneratorapi.util.PixelUtils.*;
-
 @Service
 public class GenerateNonogramService {
 
     private Net u2netModel;
     final String MODEL_PATH = "src/main/resources/u2net.onnx";
+
+    PixelUtils pixel = new PixelUtils();
 
     static {
 
@@ -79,7 +80,7 @@ public class GenerateNonogramService {
         graphics.drawImage(downscaledDimmedImage, 0, 0, null);
         graphics.dispose();
 
-        int threshold = calculateAverageBrightness(downscaledOriginalImage, matrixSize);
+        int threshold = pixel.calculateAverageBrightness(downscaledOriginalImage, matrixSize);
 
         boolean[][] nonogram = generateNonogram(grayScaledImage, threshold);
 
@@ -136,10 +137,10 @@ public class GenerateNonogramService {
 
         for (int imageXIndex = 0; imageXIndex < mainObjectFromModel.getWidth(); imageXIndex++) {
             for (int imageYIndex = 0; imageYIndex < mainObjectFromModel.getHeight(); imageYIndex++) {
-                boolean isMainObjectPixel = calculatePixelBrightness(mainObjectFromModel, imageXIndex, imageYIndex) != 0;
+                boolean isMainObjectPixel = pixel.calculatePixelBrightness(mainObjectFromModel, imageXIndex, imageYIndex) != 0;
                 int originalPixel = duplicatedOriginalImage.getRGB(imageXIndex, imageYIndex);
 
-                int updatedPixel = getUpdatedPixel(originalPixel, isMainObjectPixel, dimFactor);
+                int updatedPixel = pixel.getUpdatedPixel(originalPixel, isMainObjectPixel, dimFactor);
 
                 duplicatedOriginalImage.setRGB(imageXIndex, imageYIndex, updatedPixel);
             }
@@ -154,7 +155,7 @@ public class GenerateNonogramService {
         for (int imageXIndex = 0; imageXIndex < grayScaledImage.getWidth(); imageXIndex++) {
             for (int imageYIndex = 0; imageYIndex < grayScaledImage.getHeight(); imageYIndex++) {
 
-                int brightness = calculatePixelBrightness(grayScaledImage, imageXIndex, imageYIndex);
+                int brightness = pixel.calculatePixelBrightness(grayScaledImage, imageXIndex, imageYIndex);
                 boolean isPixelBlack = brightness < threshold;
 
                 nonogram[imageXIndex][imageYIndex] = isPixelBlack;
