@@ -83,7 +83,7 @@ public class GenerateNonogramService {
 
         String downscaledOriginalImageForCompletedNonogramsBase64 = bufferedImageToBase64(downscaledOriginalImage);
 
-        return new nonogramResponseDto(nonogram, previewImageBase64, downscaledOriginalImageForCompletedNonogramsBase64);
+        return new nonogramResponseDto(nonogram, previewImageBase64, downscaledOriginalImageForCompletedNonogramsBase64, requestBody.getMainObjectDimFactor(), requestBody.getDifficulty());
     }
 
     private BufferedImage detectMainObjectUsingModel(BufferedImage inputImage) throws Exception {

@@ -18,6 +18,6 @@ public class GenerateNonogramController {
 
     @PostMapping
     public nonogramResponseDto generateNonogram(@RequestBody nonogramGenerationRequestDto requestDto) throws Exception {
-        return  generateNonogramService.generateNonogram(requestDto);
+        return generateNonogramService.generateNonogram(requestDto);
     }
 }
