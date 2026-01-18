@@ -24,10 +24,10 @@ public class GenerateNonogramService {
 
     static {
 
-        File file = new File("src/main/resources/libopencv_java4120.dylib");
+        File algorithmLibraryFile = new File("src/main/resources/libopencv_java4120.dylib");
 
         try {
-            System.load(file.getAbsolutePath());
+            System.load(algorithmLibraryFile.getAbsolutePath());
         } catch (UnsatisfiedLinkError e) {
             throw new UnsatisfiedLinkError("Can't load openCV jar files. Error message: " + e);
         }
