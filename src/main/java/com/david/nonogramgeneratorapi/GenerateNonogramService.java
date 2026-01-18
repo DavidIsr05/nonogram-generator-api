@@ -1,233 +1,162 @@
 package com.david.nonogramgeneratorapi;
 
 import com.david.nonogramgeneratorapi.dtos.*;
+import com.david.nonogramgeneratorapi.util.PixelUtils;
 import jakarta.annotation.PostConstruct;
-import org.apache.commons.io.FileUtils;
 import org.imgscalr.Scalr;
-import org.opencv.core.*;
+import org.opencv.core.CvType;
+import org.opencv.core.Mat;
+import org.opencv.core.Scalar;
+import org.opencv.core.Size;
 import org.opencv.dnn.Dnn;
 import org.opencv.dnn.Net;
-import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
-import java.awt.Color;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
+import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.file.FileSystemException;
+import java.io.ByteArrayOutputStream;
 import java.util.Base64;
 
 @Service
 public class GenerateNonogramService {
 
-    private Net net;
-    String modelPath = "src/main/resources/u2net.onnx";
+    private Net u2netModel;
+    final String MODEL_PATH = "src/main/resources/u2net.onnx";
+
+    PixelUtils pixel = new PixelUtils();
 
     static {
+
+        final File ALGORITHM_LIBRARY_FILE = new File("src/main/resources/libopencv_java4120.dylib");
+
         try {
-            System.load("/Users/david/Documents/nonogramGeneratorAPI/src/main/resources/libopencv_java4120.dylib"); // TODO change the dir so it will work in container also
+            System.load(ALGORITHM_LIBRARY_FILE.getAbsolutePath());
         } catch (UnsatisfiedLinkError e) {
             throw new UnsatisfiedLinkError("Can't load openCV jar files. Error message: " + e);
         }
     }
 
     @PostConstruct
-    public void initModel() throws Exception {
-        try {
-            this.net = Dnn.readNetFromONNX(modelPath);
-            if (this.net.empty()) {
-                throw new CouldNotLoadModelException("Could not load model. Model variable empty after trying to load it.");
-            }
-        } catch (CouldNotLoadModelException e) {
-            throw new CouldNotLoadModelException("Exception loading model: " + e);
+    public void initModel() {
+        u2netModel = Dnn.readNetFromONNX(MODEL_PATH);
+        if (u2netModel.empty()) {
+            throw new RuntimeException(new CouldNotLoadModelException());
         }
     }
 
     public nonogramResponseDto generateNonogram(nonogramGenerationRequestDto requestBody) throws Exception {
-        byte[] decodedBytes = Base64.getDecoder().decode(requestBody.getImageBase64());
-        String outputPath = "src/main/resources/";
+        byte[] originalImageAsBytes = Base64.getDecoder().decode(requestBody.getImageBase64());
 
-        File originalImageFile = new File(outputPath + "original-image.jpg");
-        FileUtils.writeByteArrayToFile(originalImageFile, decodedBytes);
+        ByteArrayInputStream originalImageAsByteArrayStream = new ByteArrayInputStream(originalImageAsBytes);
 
-        BufferedImage originalBufferImage = ImageIO.read(originalImageFile);
+        BufferedImage originalImage = ImageIO.read(originalImageAsByteArrayStream);
 
-        String maskedImagePath = outputPath + "masked-image.png";
-        detectMainObjectUsingModel(originalImageFile.getAbsolutePath(), maskedImagePath);
+        BufferedImage mainObjectFromModel = detectMainObject(originalImage);
 
-        File processedFile = new File(maskedImagePath);
-        BufferedImage maskFromModelBufferedImage = ImageIO.read(processedFile);
-
-        BufferedImage modifiedBufferedImage = applyMaskFromModel(originalImageFile.getAbsoluteFile(), maskFromModelBufferedImage, requestBody.getPixelHighlightValue());
+        BufferedImage dimmedImage = applyDimFactor(originalImage, mainObjectFromModel, requestBody.getMainObjectDimFactor());
 
         int matrixSize = requestBody.getDifficulty().getMatrixSize();
 
-        BufferedImage scaledBufferedImage = Scalr.resize(modifiedBufferedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
-                matrixSize, Scalr.OP_ANTIALIAS);
+        BufferedImage downscaledDimmedImage = Scalr.resize(dimmedImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT, matrixSize, Scalr.OP_ANTIALIAS);
 
-        BufferedImage originalScaled = Scalr.resize(originalBufferImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT,
-                matrixSize, Scalr.OP_ANTIALIAS);
+        BufferedImage downscaledOriginalImage = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_EXACT, matrixSize, Scalr.OP_ANTIALIAS);
 
-        File originalDownscaledFile = new File(outputPath + "/original-downscaled.png");
-        ImageIO.write(originalScaled, "png", originalDownscaledFile);
+        BufferedImage grayScaledImage = new BufferedImage(matrixSize, matrixSize, BufferedImage.TYPE_BYTE_GRAY);
 
-        BufferedImage grayScaleBufferImage = new BufferedImage(matrixSize, matrixSize, BufferedImage.TYPE_BYTE_GRAY);
-        Graphics graphics = grayScaleBufferImage.getGraphics();
+        Graphics graphics = grayScaledImage.getGraphics();
 
-        graphics.setColor(java.awt.Color.WHITE);
+        graphics.setColor(Color.WHITE);
         graphics.fillRect(0, 0, matrixSize, matrixSize);
-        graphics.drawImage(scaledBufferedImage, 0, 0, null);
+        graphics.drawImage(downscaledDimmedImage, 0, 0, null);
         graphics.dispose();
 
-        int threshold = calculateAverageBrightnessOfImage(originalScaled, matrixSize);
+        int threshold = pixel.calculateAverageBrightness(downscaledOriginalImage, matrixSize);
 
-        BufferedImage blackAndWhiteBufferedImage = generateBlackAndWhiteImage(grayScaleBufferImage, threshold);
+        boolean[][] nonogram = generateNonogram(grayScaledImage, threshold);
 
-        boolean[][] nonogram = generateNonogram(blackAndWhiteBufferedImage);
+        BufferedImage downscaledOriginalImageForPreview = originalImage;
 
-        BufferedImage originalImageDownscaledForPreview = originalBufferImage;
+        final int SMALL_IMAGE_RESOLUTION = 500;
 
-        if (originalBufferImage.getHeight() > 500 | originalBufferImage.getWidth() > 500) {
-            originalImageDownscaledForPreview = Scalr.resize(originalBufferImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC,
-                    500, Scalr.OP_ANTIALIAS);
+        if (originalImage.getHeight() > SMALL_IMAGE_RESOLUTION | originalImage.getWidth() > SMALL_IMAGE_RESOLUTION) {
+            downscaledOriginalImageForPreview = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC, SMALL_IMAGE_RESOLUTION, Scalr.OP_ANTIALIAS);
         }
-        File previewFile = new File(outputPath + "/previw.png");
-        ImageIO.write(highlightOriginalImageBasedOnBlackAndWhiteImage(blackAndWhiteBufferedImage, originalImageDownscaledForPreview, threshold), "png", previewFile);
 
-        if (!originalImageFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + originalImageFile + " file with path: " + originalImageFile.getAbsolutePath());
-        if (!processedFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + processedFile + " file with path: " + processedFile.getAbsolutePath());
+        BufferedImage previewImage = createPreview(nonogram, downscaledOriginalImageForPreview, threshold, requestBody.getPreviewImageIntRGB());
 
-        byte[] previewFileContent = FileUtils.readFileToByteArray(previewFile);
-        String previewImageBase64 = Base64.getEncoder().encodeToString(previewFileContent);
+        String previewImageBase64 = bufferedImageToBase64(previewImage);
 
-        byte[] originalDownscaledFileContent = FileUtils.readFileToByteArray(originalDownscaledFile);
-        String originalDownscaledImageBase64 = Base64.getEncoder().encodeToString(originalDownscaledFileContent);
+        String downscaledOriginalImageForCompletedNonogramsBase64 = bufferedImageToBase64(downscaledOriginalImage);
 
-        if (!previewFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + previewFile + " file with path: " + previewFile.getAbsolutePath());
-        if (!originalDownscaledFile.delete()) throw new CouldNotDeleteFileException("Could not delete " + originalDownscaledFile + " file with path: " + originalDownscaledFile.getAbsolutePath());
-
-        return new nonogramResponseDto(nonogram, previewImageBase64, originalDownscaledImageBase64);
+        return new nonogramResponseDto(nonogram, previewImageBase64, downscaledOriginalImageForCompletedNonogramsBase64, requestBody.getMainObjectDimFactor(), requestBody.getDifficulty());
     }
 
-    private void detectMainObjectUsingModel(String inputPath, String outputPath) throws Exception {
-        if (this.net == null || this.net.empty()) {
-            System.err.println("skip background removal cause model not loaded");
-            try {
-                FileUtils.copyFile(new File(inputPath), new File(outputPath));
-            } catch (FileSystemException e) {
-                throw new FileSystemException(e.getMessage());
-            }
-            return;
+    private BufferedImage detectMainObject(BufferedImage inputImage) throws Exception {
+        Mat inputImageInMatFormat = bufferedImageToMat(inputImage);
+
+        if (inputImageInMatFormat.empty()) {
+            throw new FileNotFoundException("Problem while loading original image for model in: 'detectMainObjectUsingModel'");
         }
+        Mat mainObjectFromModel = Dnn.blobFromImage(inputImageInMatFormat, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
+        u2netModel.setInput(mainObjectFromModel);
 
-        Mat imageFromInputPath = Imgcodecs.imread(inputPath);
-        if (imageFromInputPath.empty()) throw new FileNotFoundException("Problem while loading original image for model in: 'detectMainObjectUsingModel', with path: " + inputPath);
-
-        Mat mainObjectFromModel = Dnn.blobFromImage(imageFromInputPath, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
-        net.setInput(mainObjectFromModel);
-
-        Mat originalMatOfMainObject = net.forward();
+        Mat originalMatOfMainObject = u2netModel.forward();
 
         Mat reshapedMatOfMainObject = originalMatOfMainObject.reshape(1, 250);
 
-        Mat resizedMatOfMainObject = new Mat();
-        Imgproc.resize(reshapedMatOfMainObject, resizedMatOfMainObject, imageFromInputPath.size());
+        Mat resizedMatOfMainObjectBasedOnOriginalInputImage = new Mat();
+
+        Imgproc.resize(reshapedMatOfMainObject, resizedMatOfMainObjectBasedOnOriginalInputImage, inputImageInMatFormat.size());
 
         Mat binaryMatOfMainObject = new Mat();
-        Imgproc.threshold(resizedMatOfMainObject, binaryMatOfMainObject, 0.5, 1, Imgproc.THRESH_BINARY);
+
+        final double binaryImageCreationThreshold = 0.5;
+
+        Imgproc.threshold(resizedMatOfMainObjectBasedOnOriginalInputImage, binaryMatOfMainObject, binaryImageCreationThreshold, 1, Imgproc.THRESH_BINARY);
+
         binaryMatOfMainObject.convertTo(binaryMatOfMainObject, CvType.CV_8U, 255);
 
-        Imgcodecs.imwrite(outputPath, binaryMatOfMainObject);
+        return matToBufferedImage(binaryMatOfMainObject);
     }
 
-    private BufferedImage applyMaskFromModel(File originalImageFile, BufferedImage maskFromModelBufferedImage, double pixelHighlightValue) throws IOException {
+    private BufferedImage applyDimFactor(BufferedImage originalImage, BufferedImage mainObjectFromModel, double dimFactor) {
+        BufferedImage duplicatedOriginalImage = new BufferedImage(originalImage.getWidth(), originalImage.getHeight(), originalImage.getType());
+        Graphics graphics = duplicatedOriginalImage.getGraphics();
+        graphics.drawImage(originalImage, 0, 0, null);
+        graphics.dispose();
 
-        BufferedImage originalBufferedImage = ImageIO.read(originalImageFile);
+        for (int imageXIndex = 0; imageXIndex < mainObjectFromModel.getWidth(); imageXIndex++) {
+            for (int imageYIndex = 0; imageYIndex < mainObjectFromModel.getHeight(); imageYIndex++) {
+                boolean isMainObjectPixel = pixel.calculatePixelBrightness(mainObjectFromModel, imageXIndex, imageYIndex) != 0;
+                int originalPixel = duplicatedOriginalImage.getRGB(imageXIndex, imageYIndex);
 
-        for (int imageYIndex = 0; imageYIndex < originalBufferedImage.getHeight(); imageYIndex++) {
-            for (int imageXIndex = 0; imageXIndex < originalBufferedImage.getWidth(); imageXIndex++) {
-                boolean isNotMainObjectPixel = calculatePixelBrightness(maskFromModelBufferedImage, imageYIndex, imageXIndex) == 0;
-                int originalPixel = originalBufferedImage.getRGB(imageXIndex, imageYIndex);
+                int updatedPixel = pixel.getUpdatedPixel(originalPixel, isMainObjectPixel, dimFactor);
 
-                int updatedPixel = getUpdatedPixel(originalPixel, isNotMainObjectPixel, pixelHighlightValue);
-
-                originalBufferedImage.setRGB(imageXIndex, imageYIndex, updatedPixel);
+                duplicatedOriginalImage.setRGB(imageXIndex, imageYIndex, updatedPixel);
             }
         }
 
-        return originalBufferedImage;
+        return duplicatedOriginalImage;
     }
 
-    private static int getUpdatedPixel(int originalPixel, boolean isNotMainObjectPixel, double pixelHighlightValue) {
-        if (!isNotMainObjectPixel) {
-            Color color = new Color(originalPixel, true);
+    private boolean[][] generateNonogram(BufferedImage grayScaledImage, int threshold) {
+        boolean[][] nonogram = new boolean[grayScaledImage.getWidth()][grayScaledImage.getHeight()];
 
-            final int newRed = Math.min(255, Math.max(0, (int) (color.getRed() * pixelHighlightValue)));
-            final int newGreen = Math.min(255, Math.max(0, (int) (color.getGreen() * pixelHighlightValue)));
-            final int newBlue = Math.min(255, Math.max(0, (int) (color.getBlue() * pixelHighlightValue)));
-            final int alpha = color.getAlpha();
+        for (int imageXIndex = 0; imageXIndex < grayScaledImage.getWidth(); imageXIndex++) {
+            for (int imageYIndex = 0; imageYIndex < grayScaledImage.getHeight(); imageYIndex++) {
 
-            Color dimmedColor = new Color(newRed, newGreen, newBlue, alpha);
-            originalPixel = dimmedColor.getRGB();
-        }
-
-        return originalPixel;
-    }
-
-    private int calculatePixelBrightness(BufferedImage source, int imageYIndex, int imageXIndex) {
-        int rgb = source.getRGB(imageXIndex, imageYIndex);
-        Color pixelColorRGB = new Color(rgb);
-
-        return (pixelColorRGB.getRed() + pixelColorRGB.getGreen() + pixelColorRGB.getBlue()) / 3;
-    }
-
-    private int calculateAverageBrightnessOfImage(BufferedImage grayScaleBufferImage, int matrixSize){
-        long totalBrightness = 0;
-        for (int imageYIndex = 0; imageYIndex < grayScaleBufferImage.getHeight(); imageYIndex++) {
-            for (int imageXIndex = 0; imageXIndex < grayScaleBufferImage.getWidth(); imageXIndex++) {
-                totalBrightness += calculatePixelBrightness(grayScaleBufferImage, imageYIndex, imageXIndex);
-            }
-        }
-
-        int pixelCount = matrixSize * matrixSize;
-
-        return (int) (totalBrightness / pixelCount);
-    }
-
-    private BufferedImage generateBlackAndWhiteImage(BufferedImage grayScaleBufferImage, int threshold){
-        BufferedImage blackAndWhiteImage = new BufferedImage(
-                grayScaleBufferImage.getWidth(),
-                grayScaleBufferImage.getHeight(),
-                BufferedImage.TYPE_BYTE_BINARY
-        );
-
-        int whiteColor = 0xFFFFFF;
-        int blackColor = 0x000000;
-
-        for (int imageYIndex = 0; imageYIndex < grayScaleBufferImage.getHeight(); imageYIndex++) {
-            for (int imageXIndex = 0; imageXIndex < grayScaleBufferImage.getWidth(); imageXIndex++) {
-                int brightness = calculatePixelBrightness(grayScaleBufferImage, imageYIndex, imageXIndex);
-                int newPixel = (brightness >= threshold) ? whiteColor : blackColor;
-                blackAndWhiteImage.setRGB(imageXIndex, imageYIndex, newPixel);
-            }
-        }
-
-        return blackAndWhiteImage;
-    }
-
-    private boolean[][] generateNonogram(BufferedImage blackAndWhiteImage){
-        boolean[][] nonogram = new boolean[blackAndWhiteImage.getWidth()][blackAndWhiteImage.getHeight()];
-
-        for (int imageXIndex = 0; imageXIndex < blackAndWhiteImage.getWidth(); imageXIndex++) {
-            for (int imageYIndex = 0; imageYIndex < blackAndWhiteImage.getHeight(); imageYIndex++) {
-                int rgb = blackAndWhiteImage.getRGB(imageXIndex, imageYIndex);
-
-                Color color = new Color(rgb);
-                boolean isPixelBlack = (color.getRed() < 128);
+                int brightness = pixel.calculatePixelBrightness(grayScaledImage, imageXIndex, imageYIndex);
+                boolean isPixelBlack = brightness < threshold;
 
                 nonogram[imageXIndex][imageYIndex] = isPixelBlack;
             }
@@ -236,36 +165,81 @@ public class GenerateNonogramService {
         return nonogram;
     }
 
-    private BufferedImage highlightOriginalImageBasedOnBlackAndWhiteImage(BufferedImage blackAndWhiteImage, BufferedImage originalImage, int threshold){
-        int pixelWidthRatio = originalImage.getWidth() / blackAndWhiteImage.getWidth();
-        int pixelHeightRatio = originalImage.getHeight() / blackAndWhiteImage.getHeight();
+    private BufferedImage createPreview(boolean[][] nonogram, BufferedImage originalImage, int threshold, int previewImageIntRGB) {
+        int pixelWidthRatio = originalImage.getWidth() / nonogram.length;
+        int pixelHeightRatio = originalImage.getHeight() / nonogram.length;
 
-        for (int blackAndWhiteImageXIndex = 0; blackAndWhiteImageXIndex < blackAndWhiteImage.getWidth(); blackAndWhiteImageXIndex++){
-            for (int blackAndWhiteImageYIndex = 0; blackAndWhiteImageYIndex < blackAndWhiteImage.getHeight(); blackAndWhiteImageYIndex++){
+        int width = originalImage.getWidth();
+        int height = originalImage.getHeight();
 
-                boolean isPixelBlack = calculatePixelBrightness(blackAndWhiteImage, blackAndWhiteImageYIndex, blackAndWhiteImageXIndex) < 128;
+        Color highlightColor = new Color(previewImageIntRGB);
 
-                if (isPixelBlack){
+        BufferedImage previewImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 
-                    int coordinateXOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageXIndex*pixelWidthRatio;
-                    int coordinateYOnOriginalBasedOnBlackAndWhiteImage = blackAndWhiteImageYIndex*pixelHeightRatio;
+        Graphics2D graphics2d = previewImage.createGraphics();
+        graphics2d.setComposite(AlphaComposite.Clear);
+        graphics2d.fillRect(0, 0, width, height);
 
-                    for (int originalImageXIndex = coordinateXOnOriginalBasedOnBlackAndWhiteImage; originalImageXIndex < coordinateXOnOriginalBasedOnBlackAndWhiteImage + pixelWidthRatio/2; originalImageXIndex++) {
-                        for (int originalImageYIndex = coordinateYOnOriginalBasedOnBlackAndWhiteImage; originalImageYIndex < coordinateYOnOriginalBasedOnBlackAndWhiteImage + pixelHeightRatio/2; originalImageYIndex++) {
+        final float highDimFactor = 0.2f;
+        final float lowDimFactor = 0.6f;
 
-                            int originalPixel = originalImage.getRGB(originalImageXIndex, originalImageYIndex);
+        final int blackAndWhitePixelThreshold = 128;
 
-                            double pixelHighlightValueBasedOnImageAverageBrightness = threshold < 128 ? 0.2 : 0.6;
+        for (int nonogramXIndex = 0; nonogramXIndex < nonogram.length; nonogramXIndex++) {
+            for (int nonogramYIndex = 0; nonogramYIndex < nonogram[0].length; nonogramYIndex++) {
 
-                            int updatedPixel = getUpdatedPixel(originalPixel, false, pixelHighlightValueBasedOnImageAverageBrightness);
+                if (nonogram[nonogramXIndex][nonogramYIndex]) {
 
-                            originalImage.setRGB(originalImageXIndex, originalImageYIndex, updatedPixel);
-                        }
-                    }
+                    int coordinateXOnOriginalBasedOnNonogram = nonogramXIndex * pixelWidthRatio;
+                    int coordinateYOnOriginalBasedOnNonogram = nonogramYIndex * pixelHeightRatio;
+
+                    float previewOpacity = threshold < blackAndWhitePixelThreshold ? highDimFactor : lowDimFactor;
+
+                    graphics2d.setColor(highlightColor);
+                    graphics2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, previewOpacity));
+                    graphics2d.drawOval(coordinateXOnOriginalBasedOnNonogram, coordinateYOnOriginalBasedOnNonogram, pixelWidthRatio, pixelHeightRatio);
                 }
             }
         }
+        graphics2d.dispose();
 
-        return originalImage;
+        return previewImage;
+    }
+
+    public static Mat bufferedImageToMat(BufferedImage inputImage) {
+        BufferedImage duplicatedImage = new BufferedImage(inputImage.getWidth(), inputImage.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
+        duplicatedImage.getGraphics().drawImage(inputImage, 0, 0, null);
+
+        byte[] duplicatedImageInBytes = ((DataBufferByte) duplicatedImage.getRaster().getDataBuffer()).getData();
+
+        Mat matFormatImage = new Mat(duplicatedImage.getHeight(), duplicatedImage.getWidth(), CvType.CV_8UC3);
+        matFormatImage.put(0, 0, duplicatedImageInBytes);
+
+        return matFormatImage;
+    }
+
+    public static BufferedImage matToBufferedImage(Mat inputMatImage) {
+        int type = BufferedImage.TYPE_BYTE_GRAY;
+        if (inputMatImage.channels() > 1) {
+            type = BufferedImage.TYPE_3BYTE_BGR;
+        }
+
+        BufferedImage bufferedImageFormatImage = new BufferedImage(inputMatImage.cols(), inputMatImage.rows(), type);
+
+        byte[] inputImageInBytes = ((DataBufferByte) bufferedImageFormatImage.getRaster().getDataBuffer()).getData();
+
+        inputMatImage.get(0, 0, inputImageInBytes);
+
+        return bufferedImageFormatImage;
+    }
+
+    public static String bufferedImageToBase64(BufferedImage inputImage) throws IOException {
+        ByteArrayOutputStream inputImageInByteArray = new ByteArrayOutputStream();
+
+        ImageIO.write(inputImage, "png", inputImageInByteArray);
+
+        byte[] imageBytes = inputImageInByteArray.toByteArray();
+
+        return Base64.getEncoder().encodeToString(imageBytes);
     }
 }
