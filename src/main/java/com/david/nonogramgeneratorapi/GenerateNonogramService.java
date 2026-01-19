@@ -12,6 +12,8 @@ import org.opencv.dnn.Dnn;
 import org.opencv.dnn.Net;
 import org.opencv.imgproc.Imgproc;
 import org.springframework.stereotype.Service;
+import org.springframework.core.io.ClassPathResource;
+import nu.pattern.OpenCV;
 
 import javax.imageio.ImageIO;
 import java.awt.Graphics;
@@ -20,37 +22,45 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.awt.Color;
 import java.awt.AlphaComposite;
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.ByteArrayOutputStream;
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Base64;
 
 @Service
 public class GenerateNonogramService {
 
     private Net u2netModel;
-    final String MODEL_PATH = "src/main/resources/u2net.onnx";
 
     PixelUtils pixel = new PixelUtils();
 
     static {
-
-        final File ALGORITHM_LIBRARY_FILE = new File("src/main/resources/libopencv_java4120.dylib");
-
         try {
-            System.load(ALGORITHM_LIBRARY_FILE.getAbsolutePath());
-        } catch (UnsatisfiedLinkError e) {
-            throw new UnsatisfiedLinkError("Can't load openCV jar files. Error message: " + e);
+            OpenCV.loadLocally();
+        } catch (Exception e) {
+            throw new UnsatisfiedLinkError("Can't load OpenCV library. Error message: " + e);
         }
     }
 
     @PostConstruct
     public void initModel() {
-        u2netModel = Dnn.readNetFromONNX(MODEL_PATH);
-        if (u2netModel.empty()) {
-            throw new RuntimeException(new CouldNotLoadModelException());
+        try {
+            ClassPathResource modelResource = new ClassPathResource("u2net.onnx");
+
+            Path tempModelFile = Files.createTempFile("u2net", ".onnx");
+            tempModelFile.toFile().deleteOnExit();
+
+            try (InputStream modelStream = modelResource.getInputStream()) {
+                Files.copy(modelStream, tempModelFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            u2netModel = Dnn.readNetFromONNX(tempModelFile.toString());
+            if (u2netModel.empty()) {
+                throw new RuntimeException(new CouldNotLoadModelException());
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load u2net.onnx model", e);
         }
     }
 
