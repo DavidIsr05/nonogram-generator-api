@@ -160,7 +160,7 @@ public class GenerateNonogramService {
     }
 
     private boolean[][] generateNonogram(BufferedImage grayScaledImage, int threshold) {
-        boolean[][] nonogram = new boolean[grayScaledImage.getWidth()][grayScaledImage.getHeight()];
+        boolean[][] nonogram = new boolean[grayScaledImage.getHeight()][grayScaledImage.getWidth()];
 
         for (int imageXIndex = 0; imageXIndex < grayScaledImage.getWidth(); imageXIndex++) {
             for (int imageYIndex = 0; imageYIndex < grayScaledImage.getHeight(); imageYIndex++) {
@@ -168,7 +168,7 @@ public class GenerateNonogramService {
                 int brightness = pixel.calculatePixelBrightness(grayScaledImage, imageXIndex, imageYIndex);
                 boolean isPixelBlack = brightness < threshold;
 
-                nonogram[imageXIndex][imageYIndex] = isPixelBlack;
+                nonogram[imageYIndex][imageXIndex] = isPixelBlack;
             }
         }
 
@@ -176,7 +176,7 @@ public class GenerateNonogramService {
     }
 
     private BufferedImage createPreview(boolean[][] nonogram, BufferedImage originalImage, int threshold, int previewImageIntRGB) {
-        int pixelWidthRatio = originalImage.getWidth() / nonogram.length;
+        int pixelWidthRatio = originalImage.getWidth() / nonogram[0].length;
         int pixelHeightRatio = originalImage.getHeight() / nonogram.length;
 
         int width = originalImage.getWidth();
@@ -195,10 +195,10 @@ public class GenerateNonogramService {
 
         final int blackAndWhitePixelThreshold = 128;
 
-        for (int nonogramXIndex = 0; nonogramXIndex < nonogram.length; nonogramXIndex++) {
-            for (int nonogramYIndex = 0; nonogramYIndex < nonogram[0].length; nonogramYIndex++) {
+        for (int nonogramXIndex = 0; nonogramXIndex < nonogram[0].length; nonogramXIndex++) {
+            for (int nonogramYIndex = 0; nonogramYIndex < nonogram.length; nonogramYIndex++) {
 
-                if (nonogram[nonogramXIndex][nonogramYIndex]) {
+                if (nonogram[nonogramYIndex][nonogramXIndex]) {
 
                     int coordinateXOnOriginalBasedOnNonogram = nonogramXIndex * pixelWidthRatio;
                     int coordinateYOnOriginalBasedOnNonogram = nonogramYIndex * pixelHeightRatio;
