@@ -1,5 +1,6 @@
 package com.david.nonogramgeneratorapi.dtos;
 
+import com.david.nonogramgeneratorapi.Difficulty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -11,5 +12,8 @@ import java.io.Serializable;
 @NoArgsConstructor
 public class nonogramResponseDto implements Serializable {
     private boolean[][] nonogram;
-    private String blackAndWhiteImageBase64;
+    private String previewImageBase64;
+    private String completeNonogramImageBase64;
+    private double mainObjectDimFactor;
+    private Difficulty difficulty;
 }

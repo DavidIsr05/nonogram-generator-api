@@ -13,5 +13,6 @@ import java.io.Serializable;
 public class nonogramGenerationRequestDto implements Serializable {
     private String imageBase64;
     private Difficulty difficulty;
-    private int contrast;
+    private double mainObjectDimFactor;
+    private int previewImageIntRGB;
 }
