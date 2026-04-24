@@ -113,30 +113,40 @@ public class GenerateNonogramService {
 
     private BufferedImage detectMainObject(BufferedImage inputImage) throws Exception {
         Mat inputImageInMatFormat = bufferedImageToMat(inputImage);
-
-        if (inputImageInMatFormat.empty()) {
-            throw new FileNotFoundException("Problem while loading original image for model in: 'detectMainObjectUsingModel'");
-        }
-        Mat mainObjectFromModel = Dnn.blobFromImage(inputImageInMatFormat, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
-        u2netModel.setInput(mainObjectFromModel);
-
-        Mat originalMatOfMainObject = u2netModel.forward();
-
-        Mat reshapedMatOfMainObject = originalMatOfMainObject.reshape(1, 250);
-
+        Mat mainObjectFromModel = null;
+        Mat originalMatOfMainObject = null;
+        Mat reshapedMatOfMainObject = null;
         Mat resizedMatOfMainObjectBasedOnOriginalInputImage = new Mat();
-
-        Imgproc.resize(reshapedMatOfMainObject, resizedMatOfMainObjectBasedOnOriginalInputImage, inputImageInMatFormat.size());
-
         Mat binaryMatOfMainObject = new Mat();
 
-        final double binaryImageCreationThreshold = 0.5;
+        try {
+            if (inputImageInMatFormat.empty()) {
+                throw new FileNotFoundException("Problem while loading original image for model in: 'detectMainObjectUsingModel'");
+            }
+            mainObjectFromModel = Dnn.blobFromImage(inputImageInMatFormat, 0.01, new Size(250, 250), new Scalar(0, 0, 0), true, false);
+            u2netModel.setInput(mainObjectFromModel);
 
-        Imgproc.threshold(resizedMatOfMainObjectBasedOnOriginalInputImage, binaryMatOfMainObject, binaryImageCreationThreshold, 1, Imgproc.THRESH_BINARY);
+            originalMatOfMainObject = u2netModel.forward();
 
-        binaryMatOfMainObject.convertTo(binaryMatOfMainObject, CvType.CV_8U, 255);
+            reshapedMatOfMainObject = originalMatOfMainObject.reshape(1, 250);
 
-        return matToBufferedImage(binaryMatOfMainObject);
+            Imgproc.resize(reshapedMatOfMainObject, resizedMatOfMainObjectBasedOnOriginalInputImage, inputImageInMatFormat.size());
+
+            final double binaryImageCreationThreshold = 0.5;
+
+            Imgproc.threshold(resizedMatOfMainObjectBasedOnOriginalInputImage, binaryMatOfMainObject, binaryImageCreationThreshold, 1, Imgproc.THRESH_BINARY);
+
+            binaryMatOfMainObject.convertTo(binaryMatOfMainObject, CvType.CV_8U, 255);
+
+            return matToBufferedImage(binaryMatOfMainObject);
+        } finally {
+            inputImageInMatFormat.release();
+            if (mainObjectFromModel != null) mainObjectFromModel.release();
+            if (originalMatOfMainObject != null) originalMatOfMainObject.release();
+            if (reshapedMatOfMainObject != null) reshapedMatOfMainObject.release();
+            resizedMatOfMainObjectBasedOnOriginalInputImage.release();
+            binaryMatOfMainObject.release();
+        }
     }
 
     private BufferedImage applyDimFactor(BufferedImage originalImage, BufferedImage mainObjectFromModel, double dimFactor) {
@@ -218,7 +228,9 @@ public class GenerateNonogramService {
 
     public static Mat bufferedImageToMat(BufferedImage inputImage) {
         BufferedImage duplicatedImage = new BufferedImage(inputImage.getWidth(), inputImage.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
-        duplicatedImage.getGraphics().drawImage(inputImage, 0, 0, null);
+        Graphics graphics = duplicatedImage.getGraphics();
+        graphics.drawImage(inputImage, 0, 0, null);
+        graphics.dispose();
 
         byte[] duplicatedImageInBytes = ((DataBufferByte) duplicatedImage.getRaster().getDataBuffer()).getData();
 
